@@ -2,7 +2,6 @@ import unittest
 import io
 import sys
 from unittest.mock import patch
-# import shlex # Removed shlex
 
 from shi.cli import cli, run_cli, _parse_cli_args, _convert_value, _cli_commands
 
@@ -20,6 +19,9 @@ class TestCli(unittest.TestCase):
         # Restore stdout
         sys.stdout = self.held_stdout
 
+    def get_original_func(self, func_name):
+        return _cli_commands[func_name][1]
+
     def test_convert_value(self):
         self.assertEqual(_convert_value("123", int), 123)
         self.assertEqual(_convert_value("3.14", float), 3.14)
@@ -35,7 +37,7 @@ class TestCli(unittest.TestCase):
             pass
         
         cli_args_raw = ["value1", "123"]
-        parsed = _parse_cli_args(test_func, cli_args_raw)
+        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"arg1": "value1", "arg2": 123})
 
     def test_parse_cli_args_quoted_string(self):
@@ -45,15 +47,15 @@ class TestCli(unittest.TestCase):
         
         # sys.argv already handles unquoting, so we pass the unquoted string
         cli_args_raw = ["hello world with spaces"]
-        parsed = _parse_cli_args(test_func, cli_args_raw)
+        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"message": "hello world with spaces"})
 
         cli_args_raw = ["another message with spaces"]
-        parsed = _parse_cli_args(test_func, cli_args_raw)
+        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"message": "another message with spaces"})
 
         cli_args_raw = ["--message", "quoted value"]
-        parsed = _parse_cli_args(test_func, cli_args_raw)
+        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"message": "quoted value"})
 
     def test_parse_cli_args_var_equals_val(self):
@@ -62,7 +64,7 @@ class TestCli(unittest.TestCase):
             pass
         
         cli_args_raw = ["name=Bob", "age=25", "is_active=True"]
-        parsed = _parse_cli_args(test_func, cli_args_raw)
+        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"name": "Bob", "age": 25, "is_active": True})
 
     def test_parse_cli_args_keyword_value(self):
@@ -71,7 +73,7 @@ class TestCli(unittest.TestCase):
             pass
         
         cli_args_raw = ["--name", "Alice", "--age", "30"]
-        parsed = _parse_cli_args(test_func, cli_args_raw)
+        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"name": "Alice", "age": 30})
 
     def test_parse_cli_args_keyword_equals(self):
@@ -80,7 +82,7 @@ class TestCli(unittest.TestCase):
             pass
         
         cli_args_raw = ["--name=Bob", "--age=25"]
-        parsed = _parse_cli_args(test_func, cli_args_raw)
+        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"name": "Bob", "age": 25})
 
     def test_parse_cli_args_mixed(self):
@@ -89,7 +91,7 @@ class TestCli(unittest.TestCase):
             pass
         
         cli_args_raw = ["first_pos", "10", "kw1=True", "--kw2=3.14"]
-        parsed = _parse_cli_args(test_func, cli_args_raw)
+        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"pos1": "first_pos", "pos2": 10, "kw1": True, "kw2": 3.14})
 
     def test_run_cli_greet_command(self):
@@ -153,7 +155,6 @@ class TestCli(unittest.TestCase):
             run_cli()
         self.assertEqual(cm.exception.code, 1)
         output = self.mock_stdout.getvalue()
-        # The error message will be from Python's TypeError, caught and printed by run_cli
         self.assertIn("missing 1 required positional argument: 'param2'", output)
 
     def test_run_cli_no_command(self):
