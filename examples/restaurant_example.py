@@ -14,9 +14,9 @@ def get_customer_info(customer_name, table_number):
     print(f"Customer: {customer_name}, Table: {table_number}")
     return {"customer_name": customer_name, "table_number": table_number}
 
-@cli
+@cli # Decorate with @cli
 @arrg
-def take_order(customer_name: str, table_number: int, menu_item: str, quantity: int = 1, special_requests: str = None):
+def take_order(customer_name: str, table_number: int, menu_item: str, quantity: int, special_requests: str = None):
     """
     Takes a customer's order.
     Example CLI call: python restaurant_example.py take_order Alice 5 "Pasta Carbonara" 2

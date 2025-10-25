@@ -39,116 +39,60 @@ def _convert_value(value_str: str, target_type: Any) -> Any:
 
 
 def _parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
-
     """
-
     Parses command-line arguments for a given function.
-
     Handles basic type conversion, and var=val format.
-
     """
-
     sig = inspect.signature(func)
-
     parsed_args = {}
-
     
-
     positional_params = [p for p in sig.parameters.values() if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and p.default == inspect.Parameter.empty]
-
     
-
     cli_args_iter = iter(cli_args_raw) # Iterate directly over raw args from sys.argv
-
     
-
     pos_param_idx = 0
-
     
-
     for arg_str in cli_args_iter:
-
         # Check for var=val format (no leading dashes)
-
         if "=" in arg_str and not arg_str.startswith("--"):
-
             key, value_str = arg_str.split("=", 1)
-
             # Find the parameter in the function signature
-
             if key in sig.parameters:
-
                 param = sig.parameters[key]
-
                 parsed_args[key] = _convert_value(value_str, param.annotation)
-
             else:
-
                 # Store as extra kwargs if not a defined parameter
-
                 parsed_args[key] = value_str # Keep as string for now
-
         elif arg_str.startswith("--"):
-
             # Keyword argument: --key value or --key=value
-
             key_value_pair = arg_str[2:].split("=", 1)
-
             key = key_value_pair[0]
-
             
-
             if len(key_value_pair) == 2:
-
                 value_str = key_value_pair[1]
-
             else:
-
                 # Assume value is the next argument if not part of --key=value
-
                 try:
-
                     value_str = next(cli_args_iter)
-
                 except StopIteration:
-
                     print(f"Error: Missing value for argument --{key}")
-
                     sys.exit(1)
-
             
-
             # Find the parameter in the function signature
-
             if key in sig.parameters:
-
                 param = sig.parameters[key]
-
                 parsed_args[key] = _convert_value(value_str, param.annotation)
-
             else:
-
                 # Store as extra kwargs if not a defined parameter
-
                 parsed_args[key] = value_str # Keep as string for now
-
         else:
-
             # Positional argument
-
             if pos_param_idx < len(positional_params):
-
                 param = positional_params[pos_param_idx]
-
                 parsed_args[param.name] = _convert_value(arg_str, param.annotation)
-
                 pos_param_idx += 1
-
             else:
-
                 print(f"Warning: Unmatched positional argument '{arg_str}' for function '{func.__name__}'")
-
-
 
     return parsed_args
 
