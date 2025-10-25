@@ -28,12 +28,24 @@ This script demonstrates how `shi.arrg` resolves function arguments from various
 
 ## Restaurant Management Example
 
-To run the restaurant management example:
+To run the restaurant management example, you will use the `cli.py` utility.
 
 1.  **Ensure your virtual environment is activated.**
-2.  **Run the example script:**
-    ```bash
-    python restaurant_example.py
-    ```
+2.  **Run commands using `python shi/cli.py <command> [args...]`:**
 
-This example showcases a more realistic use case of `@arrg` in a simulated restaurant management service, demonstrating argument resolution across multiple nested functions and overriding default values.
+    *   **Take an order:**
+        ```bash
+        python shi/cli.py take_order John 5 "Pasta Carbonara" 2 special_requests="Extra cheese"
+        ```
+
+    *   **Generate a bill:**
+        ```bash
+        python shi/cli.py generate_bill Alice 10 '[{"menu_item": "Steak", "quantity": 1, "base_price": 30.00}, {"menu_item": "Wine", "quantity": 2, "base_price": 10.00}]'
+        ```
+
+    *   **Generate a bill with custom tax rate:**
+        ```bash
+        python shi/cli.py generate_bill Bob 3 '[{"menu_item": "Pizza", "quantity": 1, "base_price": 15.00}]' TAX_RATE=0.05
+        ```
+
+This example showcases a more realistic use case of `@arrg` in a simulated restaurant management service, demonstrating argument resolution across multiple nested functions and overriding default values, now exposed via a command-line interface.
