@@ -153,7 +153,8 @@ class TestCli(unittest.TestCase):
             run_cli()
         self.assertEqual(cm.exception.code, 1)
         output = self.mock_stdout.getvalue()
-        self.assertIn("Error: Missing required argument 'param2' for command 'required_arg_func'", output)
+        # The error message will be from Python's TypeError, caught and printed by run_cli
+        self.assertIn("missing 1 required positional argument: 'param2'", output)
 
     def test_run_cli_no_command(self):
         sys.argv = ["cli.py"]

@@ -108,21 +108,14 @@ def run_cli():
     # Parse arguments starting from sys.argv[2]
     parsed_args = _parse_cli_args(target_func, sys.argv[2:])
     
-    # Get default values for parameters not provided by CLI
-    final_args = {}
+    # Start with parsed_args (which includes CLI-provided values and extra kwargs)
+    final_args = {**parsed_args}
+
+    # Add default values for parameters not provided by CLI, but only if they are not already in final_args
     for name, parameter in inspect.signature(target_func).parameters.items():
-        if name in parsed_args:
-            final_args[name] = parsed_args[name]
-        elif parameter.default != inspect.Parameter.empty:
+        if name not in final_args and parameter.default != inspect.Parameter.empty:
             final_args[name] = parameter.default
-        elif parameter.kind == inspect.Parameter.VAR_POSITIONAL or parameter.kind == inspect.Parameter.VAR_KEYWORD:
-            # Handle *args and **kwargs if necessary, for now skip
-            pass
-        else:
-            # If a required parameter is missing and has no default
-            if parameter.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and parameter.default == inspect.Parameter.empty:
-                print(f"Error: Missing required argument '{name}' for command '{command_name}'")
-                sys.exit(1)
+        # No explicit check for missing required arguments here. Python's TypeError will handle it.
 
     try:
         target_func(**final_args)

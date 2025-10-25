@@ -14,9 +14,9 @@ def get_customer_info(customer_name, table_number):
     print(f"Customer: {customer_name}, Table: {table_number}")
     return {"customer_name": customer_name, "table_number": table_number}
 
-@cli # Decorate with @cli
+@cli
 @arrg
-def take_order(customer_name: str, table_number: int, menu_item: str, quantity: int, special_requests: str = None):
+def take_order(customer_name: str, table_number: int, menu_item: str, quantity: int = 1, special_requests: str = None):
     """
     Takes a customer's order.
     Example CLI call: python restaurant_example.py take_order Alice 5 "Pasta Carbonara" 2
@@ -53,7 +53,7 @@ def calculate_item_price(menu_item, quantity, base_price, TAX_RATE, SERVICE_CHAR
 
 @cli # Decorate with @cli
 @arrg
-def generate_bill(customer_name: str, table_number: int, items_ordered_json: str, TAX_RATE: float = None, SERVICE_CHARGE_RATE: float = None):
+def generate_bill(customer_name: str, table_number: int, items_ordered_json: str, TAX_RATE: float, SERVICE_CHARGE_RATE: float):
     """
     Generates a bill for the customer.
     items_ordered_json should be a JSON string representing a list of item dictionaries.
