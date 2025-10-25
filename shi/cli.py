@@ -2,6 +2,7 @@ import inspect
 import sys
 from typing import Any, Callable, Dict, List, Tuple
 from pathlib import Path
+# import shlex # Removed shlex
 
 # Dictionary to store functions decorated with @cli
 _cli_commands: Dict[str, Callable] = {}
@@ -20,42 +21,31 @@ def _convert_value(value_str: str, target_type: Any) -> Any:
         # Fallback to string if conversion fails
         return value_str
 
-def _parse_cli_args(func: Callable, cli_args: List[str]) -> Dict[str, Any]:
+def _parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
     """
-    Parses command-line arguments for a given function, treating spaces as separators.
-    Handles basic type conversion and quoted strings.
+    Parses command-line arguments for a given function.
+    Handles basic type conversion, and var=val format.
     """
     sig = inspect.signature(func)
     parsed_args = {}
     
     positional_params = [p for p in sig.parameters.values() if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and p.default == inspect.Parameter.empty]
-    keyword_params = [p for p in sig.parameters.values() if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and p.default != inspect.Parameter.empty]
-
-    i = 0
+    
+    cli_args_iter = iter(cli_args_raw) # Iterate directly over raw args from sys.argv
+    
     pos_param_idx = 0
     
-    while i < len(cli_args):
-        arg_str = cli_args[i]
-        
-        # Handle quoted strings
-        if arg_str.startswith('"') or arg_str.startswith("'"):
-            quote_char = arg_str[0]
-            end_quote_index = -1
-            
-            # Find the matching end quote
-            for j in range(i, len(cli_args)):
-                if cli_args[j].endswith(quote_char) and (j > i or len(cli_args[j]) > 1):
-                    end_quote_index = j
-                    break
-            
-            if end_quote_index != -1:
-                full_arg = " ".join(cli_args[i : end_quote_index + 1])
-                value_str = full_arg[1:-1] # Remove quotes
-                i = end_quote_index + 1
+    for arg_str in cli_args_iter:
+        # Check for var=val format (no leading dashes)
+        if "=" in arg_str and not arg_str.startswith("--"):
+            key, value_str = arg_str.split("=", 1)
+            # Find the parameter in the function signature
+            if key in sig.parameters:
+                param = sig.parameters[key]
+                parsed_args[key] = _convert_value(value_str, param.annotation)
             else:
-                # Unmatched quote, treat as a regular string
-                value_str = arg_str
-                i += 1
+                # Store as extra kwargs if not a defined parameter
+                parsed_args[key] = value_str # Keep as string for now
         elif arg_str.startswith("--"):
             # Keyword argument: --key value or --key=value
             key_value_pair = arg_str[2:].split("=", 1)
@@ -65,10 +55,9 @@ def _parse_cli_args(func: Callable, cli_args: List[str]) -> Dict[str, Any]:
                 value_str = key_value_pair[1]
             else:
                 # Assume value is the next argument if not part of --key=value
-                i += 1
-                if i < len(cli_args):
-                    value_str = cli_args[i]
-                else:
+                try:
+                    value_str = next(cli_args_iter)
+                except StopIteration:
                     print(f"Error: Missing value for argument --{key}")
                     sys.exit(1)
             
@@ -79,30 +68,14 @@ def _parse_cli_args(func: Callable, cli_args: List[str]) -> Dict[str, Any]:
             else:
                 # Store as extra kwargs if not a defined parameter
                 parsed_args[key] = value_str # Keep as string for now
-            i += 1
-            continue # Continue to next cli_arg
         else:
-            value_str = arg_str
-            i += 1
-        
-        # Assign to positional parameters
-        if pos_param_idx < len(positional_params):
-            param = positional_params[pos_param_idx]
-            parsed_args[param.name] = _convert_value(value_str, param.annotation)
-            pos_param_idx += 1
-        else:
-            # Try to assign to keyword-only parameters if they haven't been set yet
-            # This handles cases where positional args run out, but there are still CLI args
-            # that might match keyword-only params without -- prefix.
-            # This is a heuristic and might need refinement for complex cases.
-            found_kw_param = False
-            for kw_param in keyword_params:
-                if kw_param.name not in parsed_args:
-                    parsed_args[kw_param.name] = _convert_value(value_str, kw_param.annotation)
-                    found_kw_param = True
-                    break
-            if not found_kw_param:
-                print(f"Warning: Unmatched argument '{value_str}' for function '{func.__name__}'")
+            # Positional argument
+            if pos_param_idx < len(positional_params):
+                param = positional_params[pos_param_idx]
+                parsed_args[param.name] = _convert_value(arg_str, param.annotation)
+                pos_param_idx += 1
+            else:
+                print(f"Warning: Unmatched positional argument '{arg_str}' for function '{func.__name__}'")
 
     return parsed_args
 
