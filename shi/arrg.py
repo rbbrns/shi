@@ -1,7 +1,6 @@
 import functools
 import inspect
-from dprint import dprint
-
+from . import dprint
 
 def is_private(key: str) -> bool:
     """
