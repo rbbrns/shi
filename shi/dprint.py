@@ -7,6 +7,7 @@ import inspect
 import sys
 from typing import Any
 from pathlib import Path
+from rich import pretty
 
 try:
     from colorama import Fore, Style, init
@@ -72,7 +73,7 @@ def dprint(*args, **kwargs):
             for var_name, var_value in caller_frame.f_locals.items():
                 if not var_name.startswith("_"):
                     type_name = type(var_value).__name__
-                    value_repr = _format_value(var_value)
+                    value_repr = _format_value(var_value, depth=depth)
                     _print_variable(var_name, type_name, value_repr, depth)
             return
 
@@ -113,13 +114,13 @@ def dprint(*args, **kwargs):
             # Print each positional argument
             for i, (value, name) in enumerate(zip(args, var_names)):
                 type_name = type(value).__name__
-                value_repr = _format_value(value)
+                value_repr = _format_value(value, depth=depth)
                 _print_variable(name, type_name, value_repr, depth)
 
         # Print keyword arguments
         for key, value in kwargs.items():
             type_name = type(value).__name__
-            value_repr = _format_value(value)
+            value_repr = _format_value(value, depth=depth)
             _print_variable(key, type_name, value_repr, depth)
 
     finally:
@@ -193,7 +194,7 @@ def _print_backtrace(caller_frame):
                 if args_dict:
                     args_str = ", ".join(
                         [
-                            f"{Fore.GREEN}{k}{Style.RESET_ALL}={_format_value(v, max_length=30)}"
+                            f"{Fore.GREEN}{k}{Style.RESET_ALL}={_format_value(v, depth=depth)}"
                             for k, v in args_dict.items()
                         ]
                     )
@@ -224,35 +225,17 @@ def _print_variable(name: str, type_name: str, value_repr: str, depth: int = 0):
     )
 
 
-def _format_value(value: Any, max_length: int = 100) -> str:
+def _format_value(value: Any, depth: int = 0, max_length: int = 100) -> str:
     """
     Format a value for display, with intelligent truncation.
 
     Args:
             value: The value to format
-            max_length: Maximum length of the formatted string
 
     Returns:
             Formatted string representation of the value
     """
-    # Handle strings specially to show them quoted
-    if isinstance(value, str):
-        repr_val = repr(value)
-        if len(repr_val) > max_length:
-            # Remove quotes for calculation
-            content = repr_val[1:-1]
-
-            # Calculate how many characters of content to keep
-            # max_length (total) - 2 (quotes) - 3 (ellipsis) = content_length
-            content_length = max_length - 5
-
-            if content_length < 0:  # Handle very small max_length
-                content_length = 0
-
-            truncated_content = content[:content_length]
-            truncated = f"'{truncated_content}...'"
-            return f"{Fore.YELLOW}{truncated}{Style.RESET_ALL}"
-        return f"{Fore.YELLOW}{repr_val}{Style.RESET_ALL}"
+    return pretty.pretty_repr(value, indent_size=3 * depth, max_length=max_length)
 
     # Handle collections
     if isinstance(value, (list, tuple, set, frozenset)):
@@ -336,7 +319,7 @@ def dprint_frame(levels_up: int = 1):
         for var_name, var_value in target_frame.f_locals.items():
             if not var_name.startswith("_"):
                 type_name = type(var_value).__name__
-                value_repr = _format_value(var_value)
+                value_repr = _format_value(var_value, depth=depth)
                 _print_variable(var_name, type_name, value_repr, depth)
 
     finally:
