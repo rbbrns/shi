@@ -57,7 +57,7 @@ def get_globals(depth=1):
     return frame.f_globals if frame else {}
 
 
-def arrg(func):
+def arrg(func_or_class):
     """
     Decorator that automatically resolves function arguments from various scopes.
 
@@ -74,6 +74,13 @@ def arrg(func):
     __arrg_context__ stores: parent_context + caller_locals + caller_globals + bound_args + extra_kwargs
     This makes the full calling context available to nested @arrg functions.
     """
+    if inspect.isclass(func_or_class):
+        for name, method in inspect.getmembers(func_or_class, inspect.isfunction):
+            if not name.startswith("_"):
+                setattr(func_or_class, name, arrg(method))
+        return func_or_class
+
+    func = func_or_class
     sig = inspect.signature(func)
     arrg_has_kwarg_var = any(
         p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
@@ -163,8 +170,6 @@ def arrg(func):
 
     return wrapper
 
-
-####### Unit tests for arrg ########
 
 import unittest
 
@@ -277,7 +282,30 @@ class ArrgTest(unittest.TestCase):
 
         wrapped_foo = arrg(unwrapped_foo)()
 
+    def test_class_decorator(self):
+        a = 1
+        b = 2
+
+        @arrg
+        class MyClass:
+            def method1(self, a, b):
+                return a, b
+
+            def method2(self, a, b):
+                return a * 2, b * 2
+
+            def _private_method(self, a, b):
+                return a, b
+
+        instance = MyClass()
+        self.assertEqual(instance.method1(), (1, 2))
+        self.assertEqual(instance.method1(a=10), (10, 2))
+        self.assertEqual(instance.method2(), (2, 4))
+
+        # Check that private methods are not wrapped
+        with self.assertRaises(TypeError):
+            instance._private_method()
+
 
 if __name__ == "__main__":
     unittest.main()
-    print("All tests passed!")
