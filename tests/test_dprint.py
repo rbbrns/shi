@@ -111,3 +111,47 @@ class TestDprint(unittest.TestCase):
         self.assertIn("None", self._remove_ansi_escape_codes(_format_value(None)))
         self.assertIn("True", self._remove_ansi_escape_codes(_format_value(True)))
         self.assertIn("False", self._remove_ansi_escape_codes(_format_value(False)))
+
+    def test_dprint_bound_method_self(self):
+        class MyClass:
+            def my_method(self, x):
+                dprint(x)
+
+        instance = MyClass()
+        instance.my_method(10)
+        output = self._remove_ansi_escape_codes(self.mock_stdout.getvalue())
+
+        # Check that the backtrace shows `my_method(self, x=10)` and not the value of self
+        self.assertIn("my_method(self, x=10)", output)
+        self.assertNotIn("MyClass object", output)
+
+    def test_dprint_hide_wrappers(self):
+        import functools
+
+        def simple_decorator(f):
+            @functools.wraps(f)
+            def wrapper(*args, **kwargs):
+                return f(*args, **kwargs)
+            return wrapper
+
+        @simple_decorator
+        def wrapped_function():
+            dprint(hide_wrappers=True)
+
+        wrapped_function()
+        output = self._remove_ansi_escape_codes(self.mock_stdout.getvalue())
+        self.assertNotIn("wrapper()", output)
+        self.assertIn("wrapped_function()", output)
+
+        # Reset stdout
+        self.mock_stdout = io.StringIO()
+        sys.stdout = self.mock_stdout
+
+        @simple_decorator
+        def wrapped_function_show():
+            dprint(hide_wrappers=False)
+
+        wrapped_function_show()
+        output = self._remove_ansi_escape_codes(self.mock_stdout.getvalue())
+        self.assertIn("wrapper()", output)
+        self.assertIn("wrapped_function_show()", output)
