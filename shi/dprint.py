@@ -25,7 +25,7 @@ except ImportError:
         BRIGHT = RESET_ALL = ""
 
 
-def dprint(*args, **kwargs):
+def dprint(*args, _depth=5, **kwargs):
     """
     Debug print with runtime reflection.
 
@@ -45,6 +45,7 @@ def dprint(*args, **kwargs):
             # example.py:10 main()
             #   x: int = 42
     """
+    count = 0
     # Get the caller's frame
     frame = inspect.currentframe()
     if frame is None:
@@ -66,7 +67,7 @@ def dprint(*args, **kwargs):
         short_filename = Path(filename).name
 
         # Print backtrace
-        depth = _print_backtrace(caller_frame)
+        depth = _print_backtrace(caller_frame, _depth=_depth + 1)
 
         # If no arguments, dump all local variables from caller's scope
         if not args and not kwargs:
@@ -130,13 +131,13 @@ def dprint(*args, **kwargs):
             del caller_frame
 
 
-def _print_backtrace(caller_frame):
+def _print_backtrace(caller_frame, _depth):
     """Print the call stack backtrace."""
     stack = []
     frame = caller_frame
 
     # Collect stack frames with their local variables
-    while frame is not None:
+    while frame is not None and len(stack) < _depth:
         filename = frame.f_code.co_filename
         line_number = frame.f_lineno
         function_name = frame.f_code.co_name
@@ -314,7 +315,7 @@ def dprint_frame(levels_up: int = 1):
         short_filename = Path(filename).name
 
         # Print backtrace
-        depth = _print_backtrace(target_frame)
+        depth = _print_backtrace(target_frame, _depth=levels_up + 1)
 
         for var_name, var_value in target_frame.f_locals.items():
             if not var_name.startswith("_"):
