@@ -1,6 +1,10 @@
+#!/usr/bin/env python3
+
 import functools
 import inspect
-from . import dprint
+from dprint import dprint
+from dataclasses import dataclass, field
+
 
 def is_private(key: str) -> bool:
     """
@@ -9,11 +13,33 @@ def is_private(key: str) -> bool:
     return key.startswith("_")
 
 
+def is_wrapper_frame(frame: inspect.FrameType) -> bool:
+    """
+    Determine if a frame corresponds to a known function wrapper.
+    Currently checks for the presence of '__wrapped__' in the function object.
+    """
+    if not frame:
+        return False
+    frame_locals = frame.f_locals
+    if "__wrapped__" in frame_locals:
+        return True
+    return False
+
+
 def filter_privates(d: dict) -> dict:
     """
     Return a new dictionary excluding keys that start with an underscore.
     """
     return {k: v for k, v in d.items() if not is_private(k)}
+
+
+@dataclass
+class ArrgContext:
+    """
+    Data class to hold the context for arrg resolution.
+    """
+
+    extra_kwargs: dict = field(default_factory=dict)
 
 
 def get_arrg_context():
@@ -25,7 +51,7 @@ def get_arrg_context():
         if "__arrg_context__" in frame.f_locals:
             return frame.f_locals["__arrg_context__"]
         frame = frame.f_back
-    return {}
+    return ArrgContext()
 
 
 def get_frame(depth=1):
@@ -41,38 +67,60 @@ def get_frame(depth=1):
     return frame
 
 
+def get_frames(depth=1):
+    """
+    Retrieve a list of frames up to the specified depth.
+    """
+    frames = []
+    frame = get_frame(depth=2)
+    while frame and len(frames) < depth:
+        if not is_wrapper_frame(frame):
+            frames.append(frame)
+        frame = frame.f_back
+    return frames
+
+
 def get_locals(depth=1):
     """
-    Retrieve the immediate caller's local variables.
+    Retrieve a merged dictionary of local variables from the call stack.
+    Later frames override earlier ones. Private variables and function wrappers
+    are ignored.
     """
-    frame = get_frame(depth + 1)
-    return frame.f_locals if frame else {}
+    frames = get_frames(depth + 1)[1:]  # Skip our own frame
+    all_locals = {}
+    for frame in reversed(frames):
+        all_locals.update(filter_privates(frame.f_locals))
+    return all_locals
 
 
 def get_globals(depth=1):
     """
-    Retrieve the immediate caller's global variables.
+    Retrieve a dictionary of global variables from the call stack.
+    Private variables are ignored.
     """
-    frame = get_frame(depth + 1)
-    return frame.f_globals if frame else {}
+    frames = get_frames(depth + 1)[1:]  # Skip our own frame
+    all_globals = {}
+    for frame in reversed(frames):
+        all_globals.update(filter_privates(frame.f_globals))
+    return all_globals
 
 
 def arrg(func_or_class):
     """
-    Decorator that automatically resolves function arguments from various scopes.
+    Decorator that automatically resolves function arguments from caller scope.
+    It effectively flattens the variable resolution scope. Private variables
+    (those starting with an '_') are ignored.
 
     Argument Resolution Priority (in order):
     1. Explicitly passed positional arguments
     2. Explicitly passed keyword argument
-    3. Function's default parameter values
-    4. Function's global scope
-    5. Immediate caller's local scope
-    6. Immediate caller's global scope
-    7. Parent @arrg context (from __arrg_context__ up the stack)
+    3. Parent Extra Arguments
+    4. Function's default parameter values
+    5. Call Stack Local Scope
+    6. Function's global scope
+    7. Call Stack Global Scope
     8. None (if not found anywhere)
-
-    __arrg_context__ stores: parent_context + caller_locals + caller_globals + bound_args + extra_kwargs
-    This makes the full calling context available to nested @arrg functions.
+    __arrg_context__ stores the full calling context available to nested @arrg functions.
     """
     if inspect.isclass(func_or_class):
         for name, method in inspect.getmembers(func_or_class, inspect.isfunction):
@@ -89,12 +137,31 @@ def arrg(func_or_class):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        caller_locals = filter_privates(get_locals(2))
-        caller_globals = filter_privates(get_globals(2))
+        inspect.currentframe().f_locals["__wrapped__"] = func
+        caller_locals = get_locals(10)
+        caller_globals = get_globals(10)
         parent_context = get_arrg_context()
+
+        kwargs = parent_context.extra_kwargs | kwargs
 
         resolved_args = {}
         extra_kwargs = {}
+
+        # Check for too many positional arguments
+        max_pos_args = sum(
+            1
+            for p in sig.parameters.values()
+            if p.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        )
+        if len(args) > max_pos_args:
+            raise TypeError(
+                f"{func.__name__}() takes at most {max_pos_args} positional "
+                f"argument(s) but {len(args)} were given."
+            )
 
         # Apply explicitly passed positional arguments
         for param, arg in zip(sig.parameters.values(), args):
@@ -122,21 +189,22 @@ def arrg(func_or_class):
             if param.kind == inspect.Parameter.VAR_KEYWORD:
                 continue  # Skip **kwargs
 
-            # Step 3: Function's default parameter value
+            # Step 3: Parent Extra Arguments
+            if param_name in parent_context.extra_kwargs:
+                resolved_args[param_name] = parent_context.extra_kwargs[param_name]
+                continue
+            # Step 4: Function's default parameter value
             if param.default != inspect.Parameter.empty:
                 resolved_args[param_name] = param.default
-            # Step 4: Available in function's global scope (where function was defined)
-            elif param_name in func_globals:
-                resolved_args[param_name] = func_globals[param_name]
-            # Step 5: Available in caller's local scope
+            # Step 5: Call Stack Local Scope
             elif param_name in caller_locals:
                 resolved_args[param_name] = caller_locals[param_name]
-            # Step 6: Available in caller's global scope
+            # Step 6: Function's global scope
+            elif param_name in func_globals:
+                resolved_args[param_name] = func_globals[param_name]
+            # Step 7: Call Stack Global Scope
             elif param_name in caller_globals:
                 resolved_args[param_name] = caller_globals[param_name]
-            # Step 7: Available in parent @arrg context
-            elif param_name in parent_context:
-                resolved_args[param_name] = parent_context[param_name]
             # Step 8: If not found anywhere, default to None
             else:
                 resolved_args[param_name] = None
@@ -148,20 +216,7 @@ def arrg(func_or_class):
                 pos_only_values.append(resolved_args[param.name])
                 del resolved_args[param.name]
 
-        # Create context for this call: parent_context + caller scopes + our args
-        # Build in priority order (earlier items get overridden by later ones):
-        # 1. Parent context (inherited from up the stack)
-        # 2. Caller's globals
-        # 3. Caller's locals (overrides globals)
-        # 4. Our resolved_args (overrides caller's locals)
-        # 5. Extra kwargs (overrides everything)
-        __arrg_context__ = {
-            **parent_context,
-            **caller_globals,
-            **caller_locals,
-            **resolved_args,
-            **extra_kwargs,
-        }
+        __arrg_context__ = ArrgContext(extra_kwargs=extra_kwargs)
 
         # Call the function using the BoundArguments object
         if arrg_has_kwarg_var:
@@ -200,6 +255,35 @@ class ArrgTest(unittest.TestCase):
 
         # Extra keywords args are accepted
         self.assertEqual(foo(x=1, y=2), (1, 2))
+
+    def test_extra_kwargs_fall_through(self):
+        a1 = 1
+        b1 = 2
+
+        @arrg
+        def foo3(a3, b3, c3=300, **kwargs):
+            return a3, b3, c3, *kwargs.values()
+
+        @arrg
+        def foo2(a2, b2, c2=30):
+            return a2, b2, c2, *foo3()
+
+        @arrg
+        def foo1(a1, b1, c1=3):
+            return a1, b1, c1, *foo2()
+
+        self.assertEqual(foo1(), (1, 2, 3, None, None, 30, None, None, 300))
+        self.assertEqual(foo1(a3=10, b3=20), (1, 2, 3, None, None, 30, 10, 20, 300))
+        self.assertEqual(
+            foo1(x=-1, y=-2), (1, 2, 3, None, None, 30, None, None, 300, -1, -2)
+        )
+        self.assertEqual(
+            foo1(c1=-3, c2=-30, c3=-300), (1, 2, -3, None, None, -30, None, None, -300)
+        )
+        self.assertEqual(
+            foo1(a1=1, b1=2, c1=3, a3=100, b3=200, c3=300, a2=10, b2=20, c2=30),
+            (1, 2, 3, 10, 20, 30, 100, 200, 300),
+        )
 
     def test_function_globals(self):
         a = 1
@@ -305,6 +389,18 @@ class ArrgTest(unittest.TestCase):
         # Check that private methods are not wrapped
         with self.assertRaises(TypeError):
             instance._private_method()
+
+    def test_too_many_positional_args(self):
+        @arrg
+        def foo(a, b):
+            return a, b
+
+        with self.assertRaises(TypeError) as context:
+            foo(1, 2, 3)
+        self.assertIn(
+            "takes at most 2 positional argument(s) but 3 were given",
+            str(context.exception),
+        )
 
 
 if __name__ == "__main__":
