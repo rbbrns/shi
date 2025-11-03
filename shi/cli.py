@@ -4,7 +4,12 @@ import inspect
 import re
 import sys
 import functools
-from . import dprint
+try:
+    from . import dprint
+except ImportError:
+    # Fallback for when cli.py is run directly as a script
+    import dprint
+
 from typing import Any, Callable, Dict, List, Tuple
 
 # Dictionary to store (wrapped_func, original_func) tuples

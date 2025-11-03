@@ -3,7 +3,11 @@
 import functools
 import inspect
 import types
-from . import dprint
+try:
+    from . import dprint
+except ImportError:
+    # Fallback for when arrg.py is run directly as a script
+    import dprint
 from dataclasses import dataclass, field
 
 
