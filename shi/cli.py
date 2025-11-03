@@ -34,6 +34,7 @@ def convert_value(value_str: str, target_type: Any) -> Any:
             return eval(value_str)
         except Exception as e:
             pass
+        return value_str # Fallback if no conversion works
 
     if target_type is bool:
         return value_str.lower() in ("true", "1", "t", "y", "yes")
@@ -41,9 +42,15 @@ def convert_value(value_str: str, target_type: Any) -> Any:
         try:
             return int(value_str, 10)
         except ValueError:
-            return int(value_str, 16)
+            try:
+                return int(value_str, 16)
+            except ValueError:
+                return value_str # Fallback to string if int conversion fails
     elif target_type is float:
-        return float(value_str)
+        try:
+            return float(value_str)
+        except ValueError:
+            return value_str # Fallback to string if float conversion fails
     elif target_type is str:
         return value_str
     # Handle list types
@@ -173,10 +180,10 @@ def run_cli(argv) -> None:
     final_args = {**parsed_args}
 
     for name, parameter in inspect.signature(original_func).parameters.items():
-        if name not in final_args and parameter.default != inspect.Parameter.empty:
-            final_args[name] = parameter.default
-        else:
-            final_args.setdefault(name, None)
+        if name not in final_args:
+            if parameter.default != inspect.Parameter.empty:
+                final_args[name] = parameter.default
+            # Else: leave required parameters without default values out of final_args
 
     try:
         rtn = wrapped_func(**final_args)

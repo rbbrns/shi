@@ -3,14 +3,14 @@ import io
 import sys
 from unittest.mock import patch
 
-from shi.cli import cli, run_cli, _parse_cli_args, _convert_value, _cli_commands
+from shi.cli import cli, run_cli, parse_cli_args, convert_value, cli_commands
 
 
 class TestCli(unittest.TestCase):
 
     def setUp(self):
         # Clear registered commands before each test
-        _cli_commands.clear()
+        cli_commands.clear()
         # Capture stdout for testing print statements
         self.held_stdout = sys.stdout
         self.mock_stdout = io.StringIO()
@@ -21,17 +21,17 @@ class TestCli(unittest.TestCase):
         sys.stdout = self.held_stdout
 
     def get_original_func(self, func_name):
-        return _cli_commands[func_name][1]
+        return cli_commands[func_name][1]
 
     def test_convert_value(self):
-        self.assertEqual(_convert_value("123", int), 123)
-        self.assertEqual(_convert_value("3.14", float), 3.14)
-        self.assertEqual(_convert_value("true", bool), True)
-        self.assertEqual(_convert_value("False", bool), False)
-        self.assertEqual(_convert_value("hello", str), "hello")
-        self.assertEqual(_convert_value("123", str), "123")  # Fallback to str
+        self.assertEqual(convert_value("123", int), 123)
+        self.assertEqual(convert_value("3.14", float), 3.14)
+        self.assertEqual(convert_value("true", bool), True)
+        self.assertEqual(convert_value("False", bool), False)
+        self.assertEqual(convert_value("hello", str), "hello")
+        self.assertEqual(convert_value("123", str), "123")  # Fallback to str
         self.assertEqual(
-            _convert_value("not_a_number", int), "not_a_number"
+            convert_value("not_a_number", int), "not_a_number"
         )  # Fallback to str
 
     def test_parse_cli_args_positional(self):
@@ -40,7 +40,7 @@ class TestCli(unittest.TestCase):
             pass
 
         cli_args_raw = ["value1", "123"]
-        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"arg1": "value1", "arg2": 123})
 
     def test_parse_cli_args_quoted_string(self):
@@ -50,15 +50,15 @@ class TestCli(unittest.TestCase):
 
         # sys.argv already handles unquoting, so we pass the unquoted string
         cli_args_raw = ["hello world with spaces"]
-        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"message": "hello world with spaces"})
 
         cli_args_raw = ["another message with spaces"]
-        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"message": "another message with spaces"})
 
         cli_args_raw = ["--message", "quoted value"]
-        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"message": "quoted value"})
 
     def test_parse_cli_args_var_equals_val(self):
@@ -67,7 +67,7 @@ class TestCli(unittest.TestCase):
             pass
 
         cli_args_raw = ["name=Bob", "age=25", "is_active=True"]
-        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"name": "Bob", "age": 25, "is_active": True})
 
     def test_parse_cli_args_keyword_value(self):
@@ -76,7 +76,7 @@ class TestCli(unittest.TestCase):
             pass
 
         cli_args_raw = ["--name", "Alice", "--age", "30"]
-        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"name": "Alice", "age": 30})
 
     def test_parse_cli_args_keyword_equals(self):
@@ -85,7 +85,7 @@ class TestCli(unittest.TestCase):
             pass
 
         cli_args_raw = ["--name=Bob", "--age=25"]
-        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed, {"name": "Bob", "age": 25})
 
     def test_parse_cli_args_mixed(self):
@@ -94,7 +94,7 @@ class TestCli(unittest.TestCase):
             pass
 
         cli_args_raw = ["first_pos", "10", "kw1=True", "--kw2=3.14"]
-        parsed = _parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(
             parsed, {"pos1": "first_pos", "pos2": 10, "kw1": True, "kw2": 3.14}
         )
@@ -106,8 +106,7 @@ class TestCli(unittest.TestCase):
                 print(f"{greeting}, {name}!")
 
         # Simulate command line arguments
-        sys.argv = ["cli.py", "greet", "John", "greeting=Hi", "repeat=2"]
-        run_cli()
+        run_cli(["greet", "John", "greeting=Hi", "repeat=2"])
         output = self.mock_stdout.getvalue()
         self.assertIn("Hi, John!\nHi, John!", output)
 
@@ -117,8 +116,7 @@ class TestCli(unittest.TestCase):
             result = a + b
             print(f"The sum of {a} and {b} is {result}")
 
-        sys.argv = ["cli.py", "add", "5", "10"]
-        run_cli()
+        run_cli(["add", "5", "10"])
         output = self.mock_stdout.getvalue()
         self.assertIn("The sum of 5 and 10 is 15", output)
 
@@ -130,22 +128,19 @@ class TestCli(unittest.TestCase):
             else:
                 print(message)
 
-        sys.argv = ["cli.py", "echo", "test message", "loud=True"]
-        run_cli()
+        run_cli(["echo", "test message", "loud=True"])
         output = self.mock_stdout.getvalue()
         self.assertIn("TEST MESSAGE", output)
 
         self.mock_stdout = io.StringIO()  # Reset stdout for next assertion
         sys.stdout = self.mock_stdout
-        sys.argv = ["cli.py", "echo", "another message"]
-        run_cli()
+        run_cli(["echo", "another message"])
         output = self.mock_stdout.getvalue()
         self.assertIn("another message", output)
 
     def test_run_cli_unknown_command(self):
-        sys.argv = ["cli.py", "unknown_cmd"]
         with self.assertRaises(SystemExit) as cm:
-            run_cli()
+            run_cli(["unknown_cmd"])
         self.assertEqual(cm.exception.code, 1)
         output = self.mock_stdout.getvalue()
         self.assertIn("Error: Unknown command 'unknown_cmd'", output)
@@ -155,20 +150,20 @@ class TestCli(unittest.TestCase):
         def required_arg_func(param1: str, param2: int):
             pass
 
-        sys.argv = ["cli.py", "required_arg_func", "value1"]
         with self.assertRaises(SystemExit) as cm:
-            run_cli()
+            run_cli(["required_arg_func", "value1"])
         self.assertEqual(cm.exception.code, 1)
         output = self.mock_stdout.getvalue()
+        self.assertIn("Error calling command 'required_arg_func':", output)
         self.assertIn("missing 1 required positional argument: 'param2'", output)
 
     def test_run_cli_no_command(self):
-        sys.argv = ["cli.py"]
         with self.assertRaises(SystemExit) as cm:
-            run_cli()
+            run_cli([])
         self.assertEqual(cm.exception.code, 1)
         output = self.mock_stdout.getvalue()
-        self.assertIn("Usage: python cli.py <command> [args...]", output)
+        self.assertIn("Usage:", output)
+        self.assertIn("<command> [args...]", output)
 
 
 if __name__ == "__main__":
