@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import inspect
-import sys
 import re
-from dprint import dprint
+import sys
+import functools
+from . import dprint
 from typing import Any, Callable, Dict, List, Tuple
 
 # Dictionary to store (wrapped_func, original_func) tuples
@@ -15,7 +16,6 @@ def convert_value(value_str: str, target_type: Any) -> Any:
 
     Falls back to the original string if conversion fails.
     """
-    dprint(value_str, target_type)
 
     if target_type is inspect.Parameter.empty:
         try:
@@ -33,7 +33,7 @@ def convert_value(value_str: str, target_type: Any) -> Any:
         try:
             return eval(value_str)
         except Exception as e:
-            dprint(e)
+            pass
 
     if target_type is bool:
         return value_str.lower() in ("true", "1", "t", "y", "yes")
@@ -70,7 +70,7 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
             p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
             or p.kind == inspect.Parameter.POSITIONAL_ONLY
         )
-        and p.default == inspect.Parameter.empty
+        and p.name not in ["self", "cls", '.']
     ]
 
     cli_args_iter = iter(cli_args_raw)
@@ -127,16 +127,25 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
     return parsed_args
 
 
-def cli(func: Callable) -> Callable:
-    """Decorator to register a function as a CLI command.
+def cli(thing: Any) -> Any:
+    """Decorator to register a function or all public methods of a class."""
 
-    If the function is wrapped (has __wrapped__), the original function is used
-    for signature inspection.
-    """
-
-    original_func = func.__wrapped__ if hasattr(func, "__wrapped__") else func
-    cli_commands[original_func.__name__] = (func, original_func)
-    return func
+    if inspect.isclass(thing):
+        thing_instance = thing()
+        # It's a class, wrap all public methods
+        for name, func in inspect.getmembers(thing, inspect.isfunction):
+            if name.startswith("_"):
+                continue
+            func = getattr(thing_instance, name)
+            original_func = func.__wrapped__ if hasattr(func, "__wrapped__") else func
+            cli_commands[name] = (func, original_func)
+        return thing
+    else:
+        # It's a function, register it directly
+        func = thing
+        original_func = func.__wrapped__ if hasattr(func, "__wrapped__") else func
+        cli_commands[original_func.__name__] = (func, original_func)
+        return func
 
 
 def show_usage():
@@ -148,19 +157,19 @@ def show_usage():
     sys.exit(1)
 
 
-def run_cli() -> None:
-    """Dispatch CLI commands based on sys.argv."""
+def run_cli(argv) -> None:
+    """Dispatch CLI commands based on argv."""
 
-    if len(sys.argv) < 2:
+    if len(argv) < 1:
         show_usage()
 
-    command_name = sys.argv[1]
+    command_name = argv[0]
     if command_name not in cli_commands:
         print(f"Error: Unknown command '{command_name}'")
         show_usage()
 
     wrapped_func, original_func = cli_commands[command_name]
-    parsed_args = parse_cli_args(original_func, sys.argv[2:])
+    parsed_args = parse_cli_args(original_func, argv[1:])
     final_args = {**parsed_args}
 
     for name, parameter in inspect.signature(original_func).parameters.items():
@@ -170,7 +179,9 @@ def run_cli() -> None:
             final_args.setdefault(name, None)
 
     try:
-        wrapped_func(**final_args)
+        rtn = wrapped_func(**final_args)
+        if rtn is not None:
+            print(rtn)
     except TypeError as e:
         print(f"Error calling command '{command_name}': {e}")
         show_usage()
@@ -209,4 +220,4 @@ if __name__ == "__main__":
                 print(task)
             print(foo)
 
-    run_cli()
+    run_cli(sys.argv[1:])

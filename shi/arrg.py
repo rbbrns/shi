@@ -2,7 +2,8 @@
 
 import functools
 import inspect
-from dprint import dprint
+import types
+from . import dprint
 from dataclasses import dataclass, field
 
 
@@ -13,7 +14,7 @@ def is_private(key: str) -> bool:
     return key.startswith("_")
 
 
-def is_wrapper_frame(frame: inspect.FrameType) -> bool:
+def is_wrapper_frame(frame: types.FrameType) -> bool:
     """
     Determine if a frame corresponds to a known function wrapper.
     Currently checks for the presence of '__wrapped__' in the function object.
