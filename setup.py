@@ -12,6 +12,6 @@ s = setup(
     url="https://github.com/your-username/shi",
     install_requires=[
         "lazy_object_proxy",
-        "colorama",
+        "rich",
     ],
 )

@@ -12,7 +12,6 @@ from rich.console import Console
 
 console = Console()
 
-
 def dprint(*args, hide_wrappers=True, **kwargs):
     """
     Debug print with runtime reflection.
