@@ -237,7 +237,7 @@ def _format_value(value: Any) -> str:
     """
     from rich.pretty import pretty_repr
 
-    return pretty_repr(value, max_length=1000, max_string=100)
+    return pretty_repr(value, max_length=1000, max_string=30)
 
 
 def dprint_vars(**variables):
