@@ -28,7 +28,8 @@ def convert_value(value_str: str, target_type: Any) -> Any:
         except ValueError:
             pass
         try:
-            return int(value_str, 16)
+            if value_str.startswith("0x"):
+                return int(value_str, 16)
         except ValueError:
             pass
         try:
