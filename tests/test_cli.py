@@ -3,7 +3,7 @@ import io
 import sys
 from unittest.mock import patch
 
-from shi.cli import cli, run_cli, parse_cli_args, convert_value, cli_commands
+from shi.cli import cli, run_cli, parse_cli_args, convert_value, cli_commands, console
 
 
 class TestCli(unittest.TestCase):
@@ -15,6 +15,9 @@ class TestCli(unittest.TestCase):
         self.held_stdout = sys.stdout
         self.mock_stdout = io.StringIO()
         sys.stdout = self.mock_stdout
+        # Disable colors for testing
+        console.force_terminal = False
+        console._color_system = None
 
     def tearDown(self):
         # Restore stdout
@@ -164,6 +167,46 @@ class TestCli(unittest.TestCase):
         output = self.mock_stdout.getvalue()
         self.assertIn("Usage:", output)
         self.assertIn("<command> [args...]", output)
+
+    def test_run_cli_help_general(self):
+        @cli
+        def my_cmd(arg: int):
+            """My command docstring."""
+            pass
+
+        with self.assertRaises(SystemExit) as cm:
+            run_cli(["?"])
+        self.assertEqual(cm.exception.code, 0)
+        output = self.mock_stdout.getvalue()
+        self.assertIn("Usage:", output)
+        self.assertIn("my_cmd", output)
+        self.assertIn("(for command help)", output)
+
+    def test_run_cli_help_command(self):
+        @cli
+        def my_cmd(arg: int, default_val: str = "test"):
+            """My command docstring."""
+            pass
+
+        with self.assertRaises(SystemExit) as cm:
+            run_cli(["my_cmd", "?"])
+        self.assertEqual(cm.exception.code, 0)
+        output = self.mock_stdout.getvalue()
+        self.assertIn("Command:", output)
+        self.assertIn("my_cmd", output)
+        self.assertIn("Usage:", output)
+        self.assertIn("Description:", output)
+        self.assertIn("My command docstring.", output)
+        self.assertIn("Source:", output)
+        # Check for signature in source
+        self.assertIn("def my_cmd(arg: int", output)
+
+    def test_run_cli_help_unknown_command(self):
+        with self.assertRaises(SystemExit) as cm:
+            run_cli(["unknown_cmd", "?"])
+        self.assertEqual(cm.exception.code, 1)
+        output = self.mock_stdout.getvalue()
+        self.assertIn("Error: Unknown command 'unknown_cmd'", output)
 
 
 if __name__ == "__main__":

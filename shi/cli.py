@@ -4,6 +4,7 @@ import inspect
 import re
 import sys
 import functools
+
 try:
     from . import dprint
 except ImportError:
@@ -11,9 +12,13 @@ except ImportError:
     import dprint
 
 from typing import Any, Callable, Dict, List, Tuple
+from rich.console import Console
+from rich.syntax import Syntax
+from rich.markup import escape
 
 # Dictionary to store (wrapped_func, original_func) tuples
 cli_commands: Dict[str, Tuple[Callable, Callable]] = {}
+console = Console()
 
 
 def convert_value(value_str: str, target_type: Any) -> Any:
@@ -40,7 +45,7 @@ def convert_value(value_str: str, target_type: Any) -> Any:
             return eval(value_str)
         except Exception as e:
             pass
-        return value_str # Fallback if no conversion works
+        return value_str  # Fallback if no conversion works
 
     if target_type is bool:
         return value_str.lower() in ("true", "1", "t", "y", "yes")
@@ -51,12 +56,12 @@ def convert_value(value_str: str, target_type: Any) -> Any:
             try:
                 return int(value_str, 16)
             except ValueError:
-                return value_str # Fallback to string if int conversion fails
+                return value_str  # Fallback to string if int conversion fails
     elif target_type is float:
         try:
             return float(value_str)
         except ValueError:
-            return value_str # Fallback to string if float conversion fails
+            return value_str  # Fallback to string if float conversion fails
     elif target_type is str:
         return value_str
     # Handle list types
@@ -83,7 +88,7 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
             p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
             or p.kind == inspect.Parameter.POSITIONAL_ONLY
         )
-        and p.name not in ["self", "cls", '.']
+        and p.name not in ["self", "cls", "."]
     ]
 
     cli_args_iter = iter(cli_args_raw)
@@ -161,25 +166,72 @@ def cli(thing: Any) -> Any:
         return func
 
 
-def show_usage():
-    print(f"Usage: {sys.argv[0]} <command> [args...]")
-    print("Available commands:")
+def show_command_help(cmd_name: str):
+    if cmd_name not in cli_commands:
+        console.print(
+            f"[bold red]Error: Unknown command '{escape(cmd_name)}'[/bold red]"
+        )
+        show_usage(exit_code=1)
+
+    wrapped_func, original_func = cli_commands[cmd_name]
+    sig = inspect.signature(original_func)
+    console.print(
+        f"[bold magenta]Command:[/bold magenta] [bold green]{escape(cmd_name)}[/bold green]"
+    )
+    console.print(
+        f"[bold magenta]Usage:[/bold magenta] {escape(cmd_name)}{escape(str(sig))}"
+    )
+    if original_func.__doc__:
+        console.print(f"\n[bold magenta]Description:[/bold magenta]")
+        console.print(f"[cyan]{escape(inspect.getdoc(original_func))}[/cyan]")
+
+    console.print(f"\n[bold magenta]Source:[/bold magenta]")
+    try:
+        source = inspect.getsource(original_func)
+        syntax = Syntax(source, "python", theme="monokai", line_numbers=True)
+        console.print(syntax)
+    except OSError:
+        console.print("[yellow](Source unavailable)[/yellow]")
+    sys.exit(0)
+
+
+def show_usage(exit_code: int = 1):
+    console.print(
+        f"[bold magenta]Usage:[/bold magenta] {escape(sys.argv[0])} <command> {escape('[args...]')}"
+    )
+    console.print(f"       {escape(sys.argv[0])} <command> ... ?   (for command help)")
+    console.print(f"[bold magenta]Available commands:[/bold magenta]")
     for cmd_name, (wrapped_func, original_func) in cli_commands.items():
         sig = inspect.signature(original_func)
-        print(f"  {cmd_name}{sig}")
-    sys.exit(1)
+        console.print(
+            f"  [bold green]{escape(cmd_name)}[/bold green]{escape(str(sig))}"
+        )
+    sys.exit(exit_code)
 
 
-def run_cli(argv) -> None:
-    """Dispatch CLI commands based on argv."""
+def run_cli(argv: List[str] = None) -> None:
+    """Dispatch CLI commands based on argv.
+
+    If argv is None, defaults to sys.argv[1:].
+    """
+    if argv is None:
+        argv = sys.argv[1:]
 
     if len(argv) < 1:
-        show_usage()
+        show_usage(exit_code=1)
+
+    if argv[-1] == "?":
+        if len(argv) == 1:
+            show_usage(exit_code=0)
+        else:
+            show_command_help(argv[0])
 
     command_name = argv[0]
     if command_name not in cli_commands:
-        print(f"Error: Unknown command '{command_name}'")
-        show_usage()
+        console.print(
+            f"[bold red]Error: Unknown command '{escape(command_name)}'[/bold red]"
+        )
+        show_usage(exit_code=1)
 
     wrapped_func, original_func = cli_commands[command_name]
     parsed_args = parse_cli_args(original_func, argv[1:])
