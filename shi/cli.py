@@ -124,8 +124,27 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
         elif match := re.match(r"^([^+\s]+)(\+\+|--)$", arg_str):
             # Handle key++ and key-- for boolean flags
             key, op = match.groups()
-            if key in sig.parameters and sig.parameters[key].annotation == bool:
+            is_bool = True
+            if key in sig.parameters:
+                param = sig.parameters[key]
+                if param.annotation != bool and not (
+                    param.annotation == inspect.Parameter.empty
+                    and isinstance(param.default, bool)
+                ):
+                    is_bool = False
+
+            if is_bool:
                 parsed_args[key] = op == "++"
+            else:
+                # Not a boolean parameter, treat as positional argument
+                if pos_param_idx < len(positional_params):
+                    param = positional_params[pos_param_idx]
+                    parsed_args[param.name] = convert_value(arg_str, param.annotation)
+                    pos_param_idx += 1
+                else:
+                    print(
+                        f"Warning: Unmatched positional argument '{arg_str}' for function '{func.__name__}'"
+                    )
         else:
             # Positional argument
             if pos_param_idx < len(positional_params):
