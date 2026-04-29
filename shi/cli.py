@@ -189,8 +189,11 @@ def show_usage():
     sys.exit(1)
 
 
-def run_cli(argv) -> None:
+def run_cli(argv, debug=False) -> None:
     """Dispatch CLI commands based on argv."""
+
+    if debug:
+        print(f"Debug mode enabled. argv: {argv}")
 
     if len(argv) < 1:
         show_usage()
@@ -204,7 +207,11 @@ def run_cli(argv) -> None:
     parsed_args = parse_cli_args(original_func, argv[1:])
     final_args = {**parsed_args}
 
-    for name, parameter in inspect.signature(original_func).parameters.items():
+    sig = inspect.signature(original_func)
+    if debug and "debug" in sig.parameters and "debug" not in final_args:
+        final_args["debug"] = True
+
+    for name, parameter in sig.parameters.items():
         if name not in final_args:
             if parameter.default != inspect.Parameter.empty:
                 final_args[name] = parameter.default
