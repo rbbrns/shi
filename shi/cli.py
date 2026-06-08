@@ -67,11 +67,16 @@ def convert_value(value_str: str, target_type: Any) -> Any:
             return float(value_str)
         except ValueError:
             pass
-        try:
-            return eval(value_str)
-        except Exception as e:
-            pass
-        return value_str  # Fallback if no conversion works
+        if value_str in ("True", "False", "None") or (
+            value_str.startswith("[") and value_str.endswith("]")
+        ) or (
+            value_str.startswith("{") and value_str.endswith("}")
+        ):
+            try:
+                return eval(value_str)
+            except Exception:
+                pass
+        return value_str # Fallback if no conversion works
 
     # Enum support
     if isinstance(target_type, type) and issubclass(target_type, Enum):
