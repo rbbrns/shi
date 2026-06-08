@@ -354,6 +354,14 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
+def normalize_command_name(name: str, case_insensitive: bool = True, normalize_separators: bool = True) -> str:
+    if case_insensitive:
+        name = name.lower()
+    if normalize_separators:
+        name = name.replace("-", "_")
+    return name
+
+
 def show_command_help(cmd_name: str):
     _register_aliases()
     if cmd_name not in cli_commands:
@@ -404,7 +412,7 @@ def show_usage(exit_code: int = 1):
 cli_run_called = False
 
 
-def run_cli(argv: List[str] = None, debug: bool = False) -> None:
+def run_cli(argv: List[str] = None, debug: bool = False, case_insensitive: bool = True, normalize_separators: bool = True) -> None:
     """Dispatch CLI commands based on argv.
 
     If argv is None, defaults to sys.argv[1:].
@@ -428,17 +436,24 @@ def run_cli(argv: List[str] = None, debug: bool = False) -> None:
             show_command_help(argv[0])
 
     command_name = argv[0]
-    if command_name not in cli_commands:
+    matched_cmd_name = None
+    for registered_name in cli_commands:
+        if normalize_command_name(registered_name, case_insensitive, normalize_separators) == \
+           normalize_command_name(command_name, case_insensitive, normalize_separators):
+            matched_cmd_name = registered_name
+            break
+
+    if matched_cmd_name is None:
         console.print(
             f"[bold red]Error: Unknown command '{escape(command_name)}'[/bold red]"
         )
         show_usage(exit_code=1)
 
-    wrapped_func, original_func = cli_commands[command_name]
+    wrapped_func, original_func = cli_commands[matched_cmd_name]
     try:
         bound = parse_cli_args(original_func, argv[1:])
     except TypeError as e:
-        print(f"Error parsing arguments for '{command_name}': {e}")
+        print(f"Error parsing arguments for '{matched_cmd_name}': {e}")
         sys.exit(1)
 
     sig = inspect.signature(original_func)
@@ -450,7 +465,7 @@ def run_cli(argv: List[str] = None, debug: bool = False) -> None:
         if rtn is not None:
             print(rtn)
     except TypeError as e:
-        print(f"Error calling command '{command_name}': {e}")
+        print(f"Error calling command '{matched_cmd_name}': {e}")
         raise e
 
 

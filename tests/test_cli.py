@@ -193,6 +193,40 @@ class TestCli(unittest.TestCase):
         self.assertIn("Error parsing arguments for 'required_arg_func':", output)
         self.assertIn("missing a required argument: 'param2'", output)
 
+    def test_run_cli_case_insensitive(self):
+        @cli
+        def my_command():
+            print("my_command executed")
+
+        # Test default behavior (case_insensitive=True)
+        run_cli(["MY_COMMAND"])
+        output = self.mock_stdout.getvalue()
+        self.assertIn("my_command executed", output)
+
+        # Test disabling case_insensitive
+        self.mock_stdout.truncate(0)
+        self.mock_stdout.seek(0)
+        with self.assertRaises(SystemExit) as cm:
+            run_cli(["MY_COMMAND"], case_insensitive=False)
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_run_cli_normalize_separators(self):
+        @cli
+        def my_under_score_command():
+            print("my_under_score_command executed")
+
+        # Test default behavior (normalize_separators=True)
+        run_cli(["my-under-score-command"])
+        output = self.mock_stdout.getvalue()
+        self.assertIn("my_under_score_command executed", output)
+
+        # Test disabling normalize_separators
+        self.mock_stdout.truncate(0)
+        self.mock_stdout.seek(0)
+        with self.assertRaises(SystemExit) as cm:
+            run_cli(["my-under-score-command"], normalize_separators=False)
+        self.assertEqual(cm.exception.code, 1)
+
     def test_run_cli_no_command(self):
         with self.assertRaises(SystemExit) as cm:
             run_cli([])
