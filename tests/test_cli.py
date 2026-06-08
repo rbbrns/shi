@@ -66,7 +66,7 @@ class TestCli(unittest.TestCase):
 
         cli_args_raw = ["value1", "123"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"arg1": "value1", "arg2": 123})
+        self.assertEqual(parsed.arguments, {"arg1": "value1", "arg2": 123})
 
     def test_parse_cli_args_quoted_string(self):
         @cli
@@ -76,15 +76,15 @@ class TestCli(unittest.TestCase):
         # sys.argv already handles unquoting, so we pass the unquoted string
         cli_args_raw = ["hello world with spaces"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"message": "hello world with spaces"})
+        self.assertEqual(parsed.arguments, {"message": "hello world with spaces"})
 
         cli_args_raw = ["another message with spaces"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"message": "another message with spaces"})
+        self.assertEqual(parsed.arguments, {"message": "another message with spaces"})
 
         cli_args_raw = ["--message", "quoted value"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"message": "quoted value"})
+        self.assertEqual(parsed.arguments, {"message": "quoted value"})
 
     def test_parse_cli_args_var_equals_val(self):
         @cli
@@ -93,7 +93,7 @@ class TestCli(unittest.TestCase):
 
         cli_args_raw = ["name=Bob", "age=25", "is_active=True"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"name": "Bob", "age": 25, "is_active": True})
+        self.assertEqual(parsed.arguments, {"name": "Bob", "age": 25, "is_active": True})
 
     def test_parse_cli_args_keyword_value(self):
         @cli
@@ -102,7 +102,7 @@ class TestCli(unittest.TestCase):
 
         cli_args_raw = ["--name", "Alice", "--age", "30"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"name": "Alice", "age": 30})
+        self.assertEqual(parsed.arguments, {"name": "Alice", "age": 30})
 
     def test_parse_cli_args_keyword_equals(self):
         @cli
@@ -111,7 +111,7 @@ class TestCli(unittest.TestCase):
 
         cli_args_raw = ["--name=Bob", "--age=25"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"name": "Bob", "age": 25})
+        self.assertEqual(parsed.arguments, {"name": "Bob", "age": 25})
 
     def test_parse_cli_args_mixed(self):
         @cli
@@ -121,7 +121,18 @@ class TestCli(unittest.TestCase):
         cli_args_raw = ["first_pos", "10", "kw1=True", "--kw2=3.14"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(
-            parsed, {"pos1": "first_pos", "pos2": 10, "kw1": True, "kw2": 3.14}
+            parsed.arguments, {"pos1": "first_pos", "pos2": 10, "kw1": True, "kw2": 3.14}
+        )
+
+    def test_parse_cli_args_var_positional(self):
+        @cli
+        def test_func(pos1: str, *args: str):
+            pass
+
+        cli_args_raw = ["first_pos", "extra1", "extra2"]
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        self.assertEqual(
+            parsed.arguments, {"pos1": "first_pos", "args": ("extra1", "extra2")}
         )
 
     def test_run_cli_greet_command(self):
@@ -179,8 +190,8 @@ class TestCli(unittest.TestCase):
             run_cli(["required_arg_func", "value1"])
         self.assertEqual(cm.exception.code, 1)
         output = self.mock_stdout.getvalue()
-        self.assertIn("Error calling command 'required_arg_func':", output)
-        self.assertIn("missing 1 required positional argument: 'param2'", output)
+        self.assertIn("Error parsing arguments for 'required_arg_func':", output)
+        self.assertIn("missing a required argument: 'param2'", output)
 
     def test_run_cli_no_command(self):
         with self.assertRaises(SystemExit) as cm:

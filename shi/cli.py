@@ -140,60 +140,38 @@ def convert_value(value_str: str, target_type: Any) -> Any:
     return value_str
 
 
-def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
-    """Parse command-line arguments for a given function.
+def is_bool_parameter(param: inspect.Parameter) -> bool:
+    return param.annotation is bool or (
+        param.annotation is inspect.Parameter.empty
+        and isinstance(param.default, bool)
+    )
 
-    Supports var=val, --key value --key=value, key++ and key--, and positional args with basic type conversion.
+
+def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArguments:
+    """Parse command-line arguments for a given function and return BoundArguments.
+
+    Supports var=val, --key value --key=value, key++ and key--, and positional
+    args with basic type conversion.
     """
 
     sig = inspect.signature(func)
-    parsed_args: Dict[str, Any] = {}
-
-    positional_params = [
-        p
-        for p in sig.parameters.values()
-        if (
-            p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-            or p.kind == inspect.Parameter.POSITIONAL_ONLY
-        )
-        and p.name not in ["self", "cls", "."]
-    ]
+    raw_args: List[str] = []
+    raw_kwargs: Dict[str, Any] = {}
 
     cli_args_iter = iter(cli_args_raw)
-    pos_param_idx = 0
-
     for arg_str in cli_args_iter:
-
         if match := re.match(r"^--([^=\s]+)(=(.+))?$", arg_str):
-            # Handle --key=value and --key value formats
             key, _, value_str = match.groups()
-            if key in sig.parameters:
-                param = sig.parameters[key]
-                if value_str is None:
-                    # Value is in the next argument
-                    try:
-                        value_str = next(cli_args_iter)
-                    except StopIteration:
-                        print(f"Error: Expected value after '{arg_str}'")
-                        sys.exit(1)
-                parsed_args[key] = convert_value(value_str, param.annotation)
-            else:
-                if value_str is None:
-                    # Value is in the next argument
-                    try:
-                        value_str = next(cli_args_iter)
-                    except StopIteration:
-                        print(f"Error: Expected value after '{arg_str}'")
-                        sys.exit(1)
-                parsed_args[key] = value_str
+            if value_str is None:
+                try:
+                    value_str = next(cli_args_iter)
+                except StopIteration:
+                    print(f"Error: Expected value after '{arg_str}'")
+                    sys.exit(1)
+            raw_kwargs[key] = value_str
         elif match := re.match(r"^([^=\s]+)=(.+)$", arg_str):
-            # Hanlde var=val format (no leading dashes)
             key, value_str = match.groups()
-            if key in sig.parameters:
-                param = sig.parameters[key]
-                parsed_args[key] = convert_value(value_str, param.annotation)
-            else:
-                parsed_args[key] = value_str
+            raw_kwargs[key] = value_str
         elif match := re.match(
             r"^([a-zA-Z_][a-zA-Z0-9_]*)(\+\+|--|!~~|!~|\+|-|~~~|~~|~)$", arg_str
         ):
@@ -211,35 +189,70 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
 
             if is_valid_op:
                 if op in ("+", "++"):
-                    parsed_args[key] = True
+                    raw_kwargs[key] = True
                 elif op in ("-", "--"):
-                    parsed_args[key] = False
+                    raw_kwargs[key] = False
                 elif op in ("~", "~~", "~~~"):
-                    parsed_args[key] = None
+                    raw_kwargs[key] = None
                 elif op in ("!~", "!~~"):
-                    parsed_args[key] = True
+                    raw_kwargs[key] = True
             else:
-                # Not a boolean parameter, treat as positional argument
-                if pos_param_idx < len(positional_params):
-                    param = positional_params[pos_param_idx]
-                    parsed_args[param.name] = convert_value(arg_str, param.annotation)
-                    pos_param_idx += 1
-                else:
-                    print(
-                        f"Warning: Unmatched positional argument '{arg_str}' for function '{func.__name__}'"
-                    )
+                raw_args.append(arg_str)
+            else:
+                raw_args.append(arg_str)
         else:
-            # Positional argument
-            if pos_param_idx < len(positional_params):
-                param = positional_params[pos_param_idx]
-                parsed_args[param.name] = convert_value(arg_str, param.annotation)
-                pos_param_idx += 1
-            else:
-                print(
-                    f"Warning: Unmatched positional argument '{arg_str}' for function '{func.__name__}'"
-                )
+            raw_args.append(arg_str)
 
-    return parsed_args
+    # Convert types based on signature
+    positional_params = [
+        p
+        for p in sig.parameters.values()
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    var_positional_param = next(
+        (p for p in sig.parameters.values() if p.kind == inspect.Parameter.VAR_POSITIONAL),
+        None
+    )
+
+    converted_args = []
+    for i, arg_str in enumerate(raw_args):
+        if i < len(positional_params):
+            param = positional_params[i]
+            converted_args.append(convert_value(arg_str, param.annotation))
+        elif var_positional_param:
+            converted_args.append(convert_value(arg_str, var_positional_param.annotation))
+        else:
+            converted_args.append(arg_str)
+
+    converted_kwargs = {}
+    for key, val in raw_kwargs.items():
+        if isinstance(val, bool):
+            converted_kwargs[key] = val
+        elif key in sig.parameters:
+            param = sig.parameters[key]
+            converted_kwargs[key] = convert_value(val, param.annotation)
+        else:
+            converted_kwargs[key] = convert_value(val, inspect.Parameter.empty)
+
+    # Separate bindable kwargs from extra kwargs
+    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+    bind_kwargs = {}
+    extra_kwargs = {}
+    for key, val in converted_kwargs.items():
+        if key in sig.parameters or has_var_keyword:
+            bind_kwargs[key] = val
+        else:
+            extra_kwargs[key] = val
+
+    # Bind and apply defaults
+    bound = sig.bind(*converted_args, **bind_kwargs)
+    bound.apply_defaults()
+
+    # Add extra kwargs back
+    for key, val in extra_kwargs.items():
+        bound.arguments[key] = val
+
+    return bound
 
 
 class CliDecorator:
@@ -424,26 +437,23 @@ def run_cli(argv: List[str] = None, debug: bool = False) -> None:
         show_usage(exit_code=1)
 
     wrapped_func, original_func = cli_commands[command_name]
-    parsed_args = parse_cli_args(original_func, argv[1:])
-    final_args = {**parsed_args}
+    try:
+        bound = parse_cli_args(original_func, argv[1:])
+    except TypeError as e:
+        print(f"Error parsing arguments for '{command_name}': {e}")
+        sys.exit(1)
 
     sig = inspect.signature(original_func)
-    if debug and "debug" in sig.parameters and "debug" not in final_args:
-        final_args["debug"] = True
-
-    for name, parameter in sig.parameters.items():
-        if name not in final_args:
-            if parameter.default != inspect.Parameter.empty:
-                final_args[name] = parameter.default
-            # Else: leave required parameters without default values out of final_args
+    if debug and "debug" in sig.parameters and "debug" not in bound.arguments:
+        bound.arguments["debug"] = True
 
     try:
-        rtn = wrapped_func(**final_args)
+        rtn = wrapped_func(*bound.args, **bound.kwargs)
         if rtn is not None:
             print(rtn)
     except TypeError as e:
         print(f"Error calling command '{command_name}': {e}")
-        show_usage()
+        raise e
 
 
 if __name__ == "__main__":

@@ -16,11 +16,11 @@ class TestCliBooleanFlags(unittest.TestCase):
 
         cli_args_raw = ["android++", "board=redrix"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"android": True, "board": "redrix"})
+        self.assertEqual(parsed.arguments, {"android": True, "board": "redrix"})
 
         cli_args_raw = ["android--", "board=redrix"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"android": False, "board": "redrix"})
+        self.assertEqual(parsed.arguments, {"android": False, "board": "redrix"})
 
     def test_parse_cli_args_boolean_flag_suffix_unannotated(self):
         @cli
@@ -29,7 +29,7 @@ class TestCliBooleanFlags(unittest.TestCase):
 
         cli_args_raw = ["android++", "board=redrix"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"android": True, "board": "redrix"})
+        self.assertEqual(parsed.arguments, {"android": True, "board": "redrix"})
 
     def test_parse_cli_args_boolean_flag_suffix_not_in_sig(self):
         @cli
@@ -39,7 +39,7 @@ class TestCliBooleanFlags(unittest.TestCase):
         cli_args_raw = ["android++", "board=redrix"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         # Should still be in parsed_args, just like var=val
-        self.assertEqual(parsed, {"android": True, "board": "redrix"})
+        self.assertEqual(parsed.arguments, {"android": True, "board": "redrix"})
 
     def test_parse_cli_args_boolean_flag_suffix_fallback_to_positional(self):
         @cli
@@ -50,7 +50,7 @@ class TestCliBooleanFlags(unittest.TestCase):
         # It should fall back to being a positional argument.
         cli_args_raw = ["name++"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        self.assertEqual(parsed, {"name": "name++"})
+        self.assertEqual(parsed.arguments, {"name": "name++"})
 
 
 if __name__ == "__main__":
