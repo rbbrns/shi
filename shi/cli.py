@@ -11,7 +11,15 @@ except ImportError:
     # Fallback for when cli.py is run directly as a script
     import dprint
 
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple, get_args, get_origin
+
+try:
+    from typing import Literal
+except ImportError:
+    # Python < 3.8
+    Literal = None
+
+from enum import Enum
 from rich.console import Console
 from rich.syntax import Syntax
 from rich.markup import escape
@@ -46,6 +54,43 @@ def convert_value(value_str: str, target_type: Any) -> Any:
         except Exception as e:
             pass
         return value_str  # Fallback if no conversion works
+
+    # Enum support
+    if isinstance(target_type, type) and issubclass(target_type, Enum):
+        # First try direct lookup (case-sensitive)
+        if value_str in target_type.__members__:
+            return target_type[value_str]
+
+        # Try case-insensitive lookup
+        upper_val = value_str.upper()
+        if upper_val in target_type.__members__:
+            return target_type[upper_val]
+
+        valid_options = [e.name for e in target_type]
+        console.print(
+            f"[bold red]Error: Invalid value '{escape(value_str)}' for {target_type.__name__}.[/bold red]"
+        )
+        console.print(f"Valid options: [green]{', '.join(valid_options)}[/green]")
+        sys.exit(1)
+
+    # Literal support
+    if Literal is not None and get_origin(target_type) is Literal:
+        valid_options = get_args(target_type)
+        for option in valid_options:
+            # Check string match
+            if str(option) == value_str:
+                return option
+            # Check case-insensitive match for strings/bools
+            if str(option).lower() == value_str.lower():
+                return option
+
+        console.print(
+            f"[bold red]Error: Invalid value '{escape(value_str)}'.[/bold red]"
+        )
+        console.print(
+            f"Valid options: [green]{', '.join(map(str, valid_options))}[/green]"
+        )
+        sys.exit(1)
 
     if target_type is bool:
         return value_str.lower() in ("true", "1", "t", "y", "yes")

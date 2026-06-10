@@ -3,7 +3,15 @@ import io
 import sys
 from unittest.mock import patch
 
+from typing import Literal
+from enum import Enum, auto
 from shi.cli import cli, run_cli, parse_cli_args, convert_value, cli_commands, console
+
+
+class Color(Enum):
+    RED = auto()
+    GREEN = auto()
+    BLUE = auto()
 
 
 class TestCli(unittest.TestCase):
@@ -36,6 +44,20 @@ class TestCli(unittest.TestCase):
         self.assertEqual(
             convert_value("not_a_number", int), "not_a_number"
         )  # Fallback to str
+
+    def test_convert_value_enum(self):
+        self.assertEqual(convert_value("RED", Color), Color.RED)
+        self.assertEqual(convert_value("green", Color), Color.GREEN)  # Case insensitive
+
+        with self.assertRaises(SystemExit):
+            convert_value("YELLOW", Color)
+
+    def test_convert_value_literal(self):
+        self.assertEqual(convert_value("foo", Literal["foo", "bar"]), "foo")
+        self.assertEqual(convert_value("1", Literal[1, 2]), 1)
+
+        with self.assertRaises(SystemExit):
+            convert_value("baz", Literal["foo", "bar"])
 
     def test_parse_cli_args_positional(self):
         @cli
