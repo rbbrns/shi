@@ -361,6 +361,80 @@ class TestCli(unittest.TestCase):
         output = self.mock_stdout.getvalue()
         self.assertIn("my_sentinel_cmd(limit=~)", output)
 
+    def test_parse_cli_args_agnostic(self):
+        @cli
+        def test_func(some_arg: int, another_arg: str):
+            pass
+
+        func = self.get_original_func("test_func")
+        
+        # Test dash instead of underscore
+        parsed = parse_cli_args(func, ["--some-arg", "123", "--another-arg=hello"])
+        self.assertEqual(parsed.arguments, {"some_arg": 123, "another_arg": "hello"})
+
+        # Test case insensitivity and mixed separators
+        parsed = parse_cli_args(func, ["--Some_Arg", "456", "--AnotherArg=world"])
+        self.assertEqual(parsed.arguments, {"some_arg": 456, "another_arg": "world"})
+
+        # Test boolean flags with agnostic names
+        @cli
+        def test_bool_func(my_flag: bool):
+            pass
+            
+        bool_func = self.get_original_func("test_bool_func")
+        parsed = parse_cli_args(bool_func, ["my-flag+"])
+        self.assertEqual(parsed.arguments, {"my_flag": True})
+
+    def test_cli_collision_detection(self):
+        # Colliding arguments due to case/separator agnosticism
+        with self.assertRaises(ValueError) as cm:
+            @cli
+            def collide_func(some_arg: int, SomeArg: str):
+                pass
+        self.assertIn("Argument collision detected", str(cm.exception))
+        self.assertIn("some_arg", str(cm.exception))
+        self.assertIn("SomeArg", str(cm.exception))
+
+        with self.assertRaises(ValueError) as cm:
+            @cli
+            def collide_func3(some_arg: int, some__arg: str):
+                pass
+        self.assertIn("Argument collision detected", str(cm.exception))
+
+    def test_cli_command_collision_detection(self):
+        @cli
+        def my_cmd():
+            pass
+
+        # Case collision
+        with self.assertRaises(ValueError) as cm:
+            @cli
+            def MY_CMD():
+                pass
+        self.assertIn("Command collision detected", str(cm.exception))
+        self.assertIn("MY_CMD", str(cm.exception))
+        self.assertIn("my_cmd", str(cm.exception))
+
+        # Duplicate registration
+        with self.assertRaises(ValueError) as cm:
+            # We need to simulate duplicate registration because python might not allow redefining in same scope easily without lint warnings, but here we just want to trigger the decorator again.
+            # Actually, defining it again with same name in local scope is fine for python, it just overwrites local binding, but decorator runs twice.
+            @cli
+            def my_cmd():
+                pass
+        self.assertIn("Command collision detected", str(cm.exception))
+
+        # Collision across classes
+        @cli
+        class ClassA:
+            def command_one(self): pass
+            
+        with self.assertRaises(ValueError) as cm:
+            @cli
+            class ClassB:
+                def Command_One(self): pass
+        self.assertIn("Command collision detected", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

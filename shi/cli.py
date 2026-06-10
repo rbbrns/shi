@@ -147,14 +147,22 @@ def is_bool_parameter(param: inspect.Parameter) -> bool:
     )
 
 
+def is_unannotated_none_default(param: inspect.Parameter) -> bool:
+    return (
+        param.annotation is inspect.Parameter.empty
+        and param.default is None
+    )
+
+
 def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArguments:
     """Parse command-line arguments for a given function and return BoundArguments.
 
-    Supports var=val, --key value --key=value, key++ and key--, and positional
-    args with basic type conversion.
+    Supports var=val, --key value --key=value, key+, key-, key~, key~~ (and legacy
+    key++, key--), and positional args with basic type conversion.
     """
 
     sig = inspect.signature(func)
+    param_map = {normalize_arg_name(p): p for p in sig.parameters}
     raw_args: List[str] = []
     raw_kwargs: Dict[str, Any] = {}
 
@@ -162,25 +170,28 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
     for arg_str in cli_args_iter:
         if match := re.match(r"^--([^=\s]+)(=(.+))?$", arg_str):
             key, _, value_str = match.groups()
+            actual_key = param_map.get(normalize_arg_name(key), key.replace("-", "_"))
             if value_str is None:
                 try:
                     value_str = next(cli_args_iter)
                 except StopIteration:
                     print(f"Error: Expected value after '{arg_str}'")
                     sys.exit(1)
-            raw_kwargs[key] = value_str
+            raw_kwargs[actual_key] = value_str
         elif match := re.match(r"^([^=\s]+)=(.+)$", arg_str):
             key, value_str = match.groups()
-            raw_kwargs[key] = value_str
+            actual_key = param_map.get(normalize_arg_name(key), key.replace("-", "_"))
+            raw_kwargs[actual_key] = value_str
         elif match := re.match(
             r"^([a-zA-Z_][a-zA-Z0-9_]*)(\+\+|--|!~~|!~|\+|-|~~~|~~|~)$", arg_str
         ):
             # Handle Loh postfix operators
             key, op = match.groups()
+            actual_key = param_map.get(normalize_arg_name(key), key.replace("-", "_"))
             is_valid_op = True
             if op in ("+", "++", "-", "--"):
-                if key in sig.parameters:
-                    param = sig.parameters[key]
+                if actual_key in sig.parameters:
+                    param = sig.parameters[actual_key]
                     if param.annotation != bool and not (
                         param.annotation == inspect.Parameter.empty
                         and isinstance(param.default, bool)
@@ -189,15 +200,25 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
 
             if is_valid_op:
                 if op in ("+", "++"):
-                    raw_kwargs[key] = True
+                    raw_kwargs[actual_key] = True
                 elif op in ("-", "--"):
-                    raw_kwargs[key] = False
+                    raw_kwargs[actual_key] = False
                 elif op in ("~", "~~", "~~~"):
-                    raw_kwargs[key] = None
+                    raw_kwargs[actual_key] = None
                 elif op in ("!~", "!~~"):
-                    raw_kwargs[key] = True
+                    raw_kwargs[actual_key] = True
             else:
                 raw_args.append(arg_str)
+            else:
+                is_bool = True
+                if actual_key in sig.parameters:
+                    param = sig.parameters[actual_key]
+                    is_bool = is_bool_parameter(param) or is_unannotated_none_default(param)
+
+                if is_bool:
+                    raw_kwargs[actual_key] = op in ("++", "+")
+                else:
+                    raw_args.append(arg_str)
         else:
             raw_args.append(arg_str)
 
@@ -224,7 +245,7 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
 
     converted_kwargs = {}
     for key, val in raw_kwargs.items():
-        if isinstance(val, bool):
+        if isinstance(val, bool) or val is None:
             converted_kwargs[key] = val
         elif key in sig.parameters:
             param = sig.parameters[key]
@@ -253,8 +274,81 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
     return bound
 
 
+def normalize_arg_name(name: str) -> str:
+    return name.lower().replace("-", "").replace("_", "")
+
+
+def check_argument_collisions(func: Callable):
+    sig = inspect.signature(func)
+    normalized_names = {}
+    for param_name in sig.parameters:
+        param = sig.parameters[param_name]
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        norm_name = normalize_arg_name(param_name)
+        if norm_name in normalized_names:
+            raise ValueError(
+                f"Argument collision detected in command '{func.__name__}': "
+                f"'{param_name}' and '{normalized_names[norm_name]}' both normalize to '{norm_name}'"
+            )
+        normalized_names[norm_name] = param_name
+
+
+def check_command_collision(new_name: str):
+    norm_new = normalize_command_name(new_name, case_insensitive=True, normalize_separators=True)
+    for registered_name in cli_commands:
+        norm_reg = normalize_command_name(registered_name, case_insensitive=True, normalize_separators=True)
+        if norm_new == norm_reg:
+            raise ValueError(
+                f"Command collision detected: '{new_name}' and '{registered_name}' "
+                f"both normalize to '{norm_new}'"
+            )
+
+
 class CliDecorator:
     """Decorator to register a function, module, or class, with support for dynamic attribute access to registered commands."""
+def normalize_arg_name(name: str) -> str:
+    return name.lower().replace("-", "").replace("_", "")
+
+
+def check_argument_collisions(func: Callable):
+    sig = inspect.signature(func)
+    normalized_names = {}
+    for param_name in sig.parameters:
+        param = sig.parameters[param_name]
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        norm_name = normalize_arg_name(param_name)
+        if norm_name in normalized_names:
+            raise ValueError(
+                f"Argument collision detected in command '{func.__name__}': "
+                f"'{param_name}' and '{normalized_names[norm_name]}' both normalize to '{norm_name}'"
+            )
+        normalized_names[norm_name] = param_name
+
+
+def normalize_command_name(name: str, case_insensitive: bool, normalize_separators: bool) -> str:
+    if case_insensitive:
+        name = name.lower()
+    if normalize_separators:
+        name = name.replace("-", "_")
+    return name
+
+
+def check_command_collision(new_name: str):
+    norm_new = normalize_command_name(new_name, case_insensitive=True, normalize_separators=True)
+    for registered_name in cli_commands:
+        norm_reg = normalize_command_name(registered_name, case_insensitive=True, normalize_separators=True)
+        if norm_new == norm_reg:
+            raise ValueError(
+                f"Command collision detected: '{new_name}' and '{registered_name}' "
+                f"both normalize to '{norm_new}'"
+            )
+
+
+def cli(thing: Any) -> Any:
+    """Decorator to register a function or all public methods of a class."""
+>>>>>>> 6632952 (feat: shi: Add collision detection for commands and arguments)
 
     def __call__(self, thing: Any) -> Any:
         if inspect.isclass(thing):
@@ -392,6 +486,7 @@ def show_command_help(cmd_name: str):
     except OSError:
         console.print("[yellow](Source unavailable)[/yellow]")
     sys.exit(0)
+
 
 
 def show_usage(exit_code: int = 1):
