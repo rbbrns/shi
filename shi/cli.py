@@ -29,6 +29,24 @@ cli_commands: Dict[str, Tuple[Callable, Callable]] = {}
 console = Console()
 
 
+def _register_aliases():
+    """Scan the module globals of registered functions for any aliases."""
+    aliases = {}
+    for cmd_name, (wrapped_func, original_func) in list(cli_commands.items()):
+        module_name = original_func.__module__
+        if module_name == "__main__" or module_name in sys.modules:
+            mod = sys.modules.get(module_name)
+            if mod:
+                for name, val in mod.__dict__.items():
+                    if name.startswith("_"):
+                        continue
+                    if (
+                        val is wrapped_func or val is original_func
+                    ) and name not in cli_commands:
+                        aliases[name] = (wrapped_func, original_func)
+    cli_commands.update(aliases)
+
+
 def convert_value(value_str: str, target_type: Any) -> Any:
     """Attempt to convert a string value to a target type.
 
@@ -171,11 +189,20 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
                 parsed_args[key] = convert_value(value_str, param.annotation)
             else:
                 parsed_args[key] = value_str
-        elif match := re.match(r"^([^+\s]+)(\+\+|--)$", arg_str):
-            # Handle key++ and key-- for boolean flags
+        elif match := re.match(
+            r"^([a-zA-Z_][a-zA-Z0-9_]*)(\+\+|--|!~~|!~|\+|-|~~~|~~|~)$", arg_str
+        ):
+            # Handle Loh postfix operators
             key, op = match.groups()
-            if key in sig.parameters and sig.parameters[key].annotation == bool:
-                parsed_args[key] = op == "++"
+            if key in sig.parameters:
+                if op in ("+", "++"):
+                    parsed_args[key] = True
+                elif op in ("-", "--"):
+                    parsed_args[key] = False
+                elif op in ("~", "~~", "~~~"):
+                    parsed_args[key] = None
+                elif op in ("!~", "!~~"):
+                    parsed_args[key] = True
         else:
             # Positional argument
             if pos_param_idx < len(positional_params):
@@ -212,6 +239,7 @@ def cli(thing: Any) -> Any:
 
 
 def show_command_help(cmd_name: str):
+    _register_aliases()
     if cmd_name not in cli_commands:
         console.print(
             f"[bold red]Error: Unknown command '{escape(cmd_name)}'[/bold red]"
@@ -220,11 +248,13 @@ def show_command_help(cmd_name: str):
 
     wrapped_func, original_func = cli_commands[cmd_name]
     sig = inspect.signature(original_func)
+    sig_str = str(sig)
+    sig_str = re.sub(r"=[^,\)]*_LOH_SENTINEL[^,\)]*", "=~", sig_str)
     console.print(
         f"[bold magenta]Command:[/bold magenta] [bold green]{escape(cmd_name)}[/bold green]"
     )
     console.print(
-        f"[bold magenta]Usage:[/bold magenta] {escape(cmd_name)}{escape(str(sig))}"
+        f"[bold magenta]Usage:[/bold magenta] {escape(cmd_name)}{escape(sig_str)}"
     )
     if original_func.__doc__:
         console.print(f"\n[bold magenta]Description:[/bold magenta]")
@@ -241,6 +271,7 @@ def show_command_help(cmd_name: str):
 
 
 def show_usage(exit_code: int = 1):
+    _register_aliases()
     console.print(
         f"[bold magenta]Usage:[/bold magenta] {escape(sys.argv[0])} <command> {escape('[args...]')}"
     )
@@ -248,9 +279,9 @@ def show_usage(exit_code: int = 1):
     console.print(f"[bold magenta]Available commands:[/bold magenta]")
     for cmd_name, (wrapped_func, original_func) in cli_commands.items():
         sig = inspect.signature(original_func)
-        console.print(
-            f"  [bold green]{escape(cmd_name)}[/bold green]{escape(str(sig))}"
-        )
+        sig_str = str(sig)
+        sig_str = re.sub(r"=[^,\)]*_LOH_SENTINEL[^,\)]*", "=~", sig_str)
+        console.print(f"  [bold green]{escape(cmd_name)}[/bold green]{escape(sig_str)}")
     sys.exit(exit_code)
 
 
@@ -259,6 +290,7 @@ def run_cli(argv: List[str] = None) -> None:
 
     If argv is None, defaults to sys.argv[1:].
     """
+    _register_aliases()
     if argv is None:
         argv = sys.argv[1:]
 

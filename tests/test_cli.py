@@ -3,7 +3,7 @@ import io
 import sys
 from unittest.mock import patch
 
-from typing import Literal
+from typing import Literal, Any
 from enum import Enum, auto
 from shi.cli import cli, run_cli, parse_cli_args, convert_value, cli_commands, console
 
@@ -229,6 +229,92 @@ class TestCli(unittest.TestCase):
         self.assertEqual(cm.exception.code, 1)
         output = self.mock_stdout.getvalue()
         self.assertIn("Error: Unknown command 'unknown_cmd'", output)
+
+    def test_parse_cli_args_loh_postfixes(self):
+        @cli
+        def test_func(
+            a: bool,
+            b: bool,
+            c: bool,
+            d: bool,
+            e: Any,
+            f: Any,
+            g: Any,
+            h: Any,
+            i: Any,
+        ):
+            pass
+
+        cli_args_raw = [
+            "a+",
+            "b++",
+            "c-",
+            "d--",
+            "e~",
+            "f~~",
+            "g~~~",
+            "h!~",
+            "i!~~",
+        ]
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        self.assertEqual(
+            parsed,
+            {
+                "a": True,
+                "b": True,
+                "c": False,
+                "d": False,
+                "e": None,
+                "f": None,
+                "g": None,
+                "h": True,
+                "i": True,
+            },
+        )
+
+    def test_command_aliasing(self):
+        @cli
+        def foo(x: int):
+            print(f"foo: {x}")
+
+        # Set up a module-level alias in the current module
+        module_name = foo.__module__
+        import sys
+
+        mod = sys.modules[module_name]
+
+        # Define the alias
+        mod.bar_alias = foo
+
+        # Run CLI with the alias
+        run_cli(["bar_alias", "42"])
+        output = self.mock_stdout.getvalue()
+        self.assertIn("foo: 42", output)
+
+        # Clean up global
+        if hasattr(mod, "bar_alias"):
+            delattr(mod, "bar_alias")
+
+    def test_run_cli_help_command_sentinel(self):
+        # Define a sentinel class/string simulating _LOH_SENTINEL
+        class MockSentinel:
+            def __repr__(self):
+                return "<_LOH_SENTINEL object at 0x10>"
+
+            def __str__(self):
+                return "_LOH_SENTINEL"
+
+        mock_sentinel = MockSentinel()
+
+        @cli
+        def my_sentinel_cmd(limit=mock_sentinel):
+            pass
+
+        with self.assertRaises(SystemExit) as cm:
+            run_cli(["my_sentinel_cmd", "?"])
+        self.assertEqual(cm.exception.code, 0)
+        output = self.mock_stdout.getvalue()
+        self.assertIn("my_sentinel_cmd(limit=~)", output)
 
 
 if __name__ == "__main__":
