@@ -194,7 +194,17 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
         ):
             # Handle Loh postfix operators
             key, op = match.groups()
-            if key in sig.parameters:
+            is_valid_op = True
+            if op in ("+", "++", "-", "--"):
+                if key in sig.parameters:
+                    param = sig.parameters[key]
+                    if param.annotation != bool and not (
+                        param.annotation == inspect.Parameter.empty
+                        and isinstance(param.default, bool)
+                    ):
+                        is_valid_op = False
+
+            if is_valid_op:
                 if op in ("+", "++"):
                     parsed_args[key] = True
                 elif op in ("-", "--"):
@@ -203,6 +213,16 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
                     parsed_args[key] = None
                 elif op in ("!~", "!~~"):
                     parsed_args[key] = True
+            else:
+                # Not a boolean parameter, treat as positional argument
+                if pos_param_idx < len(positional_params):
+                    param = positional_params[pos_param_idx]
+                    parsed_args[param.name] = convert_value(arg_str, param.annotation)
+                    pos_param_idx += 1
+                else:
+                    print(
+                        f"Warning: Unmatched positional argument '{arg_str}' for function '{func.__name__}'"
+                    )
         else:
             # Positional argument
             if pos_param_idx < len(positional_params):
@@ -368,7 +388,7 @@ def show_usage(exit_code: int = 1):
 cli_run_called = False
 
 
-def run_cli(argv: List[str] = None) -> None:
+def run_cli(argv: List[str] = None, debug: bool = False) -> None:
     """Dispatch CLI commands based on argv.
 
     If argv is None, defaults to sys.argv[1:].
@@ -378,6 +398,9 @@ def run_cli(argv: List[str] = None) -> None:
     _register_aliases()
     if argv is None:
         argv = sys.argv[1:]
+
+    if debug:
+        print(f"Debug mode enabled. argv: {argv}")
 
     if len(argv) < 1:
         show_usage(exit_code=1)
@@ -399,7 +422,11 @@ def run_cli(argv: List[str] = None) -> None:
     parsed_args = parse_cli_args(original_func, argv[1:])
     final_args = {**parsed_args}
 
-    for name, parameter in inspect.signature(original_func).parameters.items():
+    sig = inspect.signature(original_func)
+    if debug and "debug" in sig.parameters and "debug" not in final_args:
+        final_args["debug"] = True
+
+    for name, parameter in sig.parameters.items():
         if name not in final_args:
             if parameter.default != inspect.Parameter.empty:
                 final_args[name] = parameter.default
