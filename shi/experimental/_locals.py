@@ -2,7 +2,7 @@
 Exposes the `locals()` of the calling frame for keyword argument expansion.
 
 Usage:
-    from shi import _locals as _
+    from shi.experimental import _locals as _
 
     def foo(**kwargs):
         return kwargs
@@ -21,7 +21,7 @@ class _LocalsModule(object):
     """
     A meta class that allows for something like:
 
-    from shi import _locals as _
+    from shi.experimental import _locals as _
 
     def foo(**kwargs):
        return kwargs

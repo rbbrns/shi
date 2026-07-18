@@ -217,25 +217,105 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> Dict[str, Any]:
     return parsed_args
 
 
-def cli(thing: Any) -> Any:
-    """Decorator to register a function or all public methods of a class."""
+class CliDecorator:
+    """Decorator to register a function, module, or class, with support for dynamic attribute access to registered commands."""
 
-    if inspect.isclass(thing):
-        thing_instance = thing()
-        # It's a class, wrap all public methods
-        for name, func in inspect.getmembers(thing, inspect.isfunction):
-            if name.startswith("_"):
-                continue
-            func = getattr(thing_instance, name)
+    def __call__(self, thing: Any) -> Any:
+        if inspect.isclass(thing):
+            thing_instance = thing()
+            # It's a class, wrap all public methods
+            for name, func in inspect.getmembers(thing, inspect.isfunction):
+                if name.startswith("_"):
+                    continue
+                func = getattr(thing_instance, name)
+                original_func = (
+                    func.__wrapped__ if hasattr(func, "__wrapped__") else func
+                )
+                cli_commands[name] = (func, original_func)
+
+                import shi.main
+
+                shi.main.register_active_module(original_func.__module__)
+            return thing
+        elif inspect.ismodule(thing):
+            # Register all public functions of the module
+            for name, func in inspect.getmembers(thing, inspect.isfunction):
+                if name.startswith("_"):
+                    continue
+                # Ensure it is defined in that module (not imported)
+                if getattr(func, "__module__", None) != thing.__name__:
+                    continue
+                if getattr(func, "__shi_nocli__", False):
+                    continue
+                original_func = (
+                    func.__wrapped__ if hasattr(func, "__wrapped__") else func
+                )
+                cli_commands[original_func.__name__] = (func, original_func)
+
+            import shi.main
+
+            shi.main.register_active_module(thing.__name__)
+            return thing
+        else:
+            # It's a function, register it directly
+            func = thing
             original_func = func.__wrapped__ if hasattr(func, "__wrapped__") else func
-            cli_commands[name] = (func, original_func)
-        return thing
-    else:
-        # It's a function, register it directly
-        func = thing
-        original_func = func.__wrapped__ if hasattr(func, "__wrapped__") else func
-        cli_commands[original_func.__name__] = (func, original_func)
-        return func
+            cli_commands[original_func.__name__] = (func, original_func)
+
+            import shi.main
+
+            shi.main.register_active_module(original_func.__module__)
+            return func
+
+    def __getattr__(self, name: str) -> Any:
+        if name in cli_commands:
+            return cli_commands[name][0]  # Return the wrapped function
+        raise AttributeError(f"module/decorator 'cli' has no attribute '{name}'")
+
+
+cli = CliDecorator()
+
+
+def nocli(func: Any) -> Any:
+    """Decorator to mark a function to be excluded from auto-CLI registration."""
+    if func is not None:
+        try:
+            func.__shi_nocli__ = True
+        except AttributeError:
+            pass
+    return func
+
+
+class AutoCliSentinel:
+    def __repr__(self) -> str:
+        return "<AutoCliSentinel>"
+
+
+def __getattr__(name: str) -> Any:
+    if name == "auto":
+        import sys
+
+        for frame_info in inspect.stack():
+            module = inspect.getmodule(frame_info.frame)
+            if module is None:
+                continue
+            mod_name = module.__name__
+            if mod_name in (
+                "shi",
+                "shi.cli",
+                "shi.main",
+                "importlib._bootstrap",
+                "importlib._bootstrap_external",
+            ):
+                continue
+            if mod_name.startswith("importlib"):
+                continue
+            import shi.main
+
+            shi.main.register_autocli_module(module)
+            break
+        return AutoCliSentinel()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 def show_command_help(cmd_name: str):
@@ -285,11 +365,16 @@ def show_usage(exit_code: int = 1):
     sys.exit(exit_code)
 
 
+cli_run_called = False
+
+
 def run_cli(argv: List[str] = None) -> None:
     """Dispatch CLI commands based on argv.
 
     If argv is None, defaults to sys.argv[1:].
     """
+    global cli_run_called
+    cli_run_called = True
     _register_aliases()
     if argv is None:
         argv = sys.argv[1:]

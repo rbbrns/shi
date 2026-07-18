@@ -1,5 +1,5 @@
 import pytest
-from shi import _locals as _
+from shi.experimental import _locals as _
 
 
 def test_locals():

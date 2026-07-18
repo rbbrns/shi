@@ -1,4 +1,4 @@
-from shi.binout import binout
+from shi.experimental.binout import binout
 
 print("--- Demo 1: Slices and Combined View ---")
 # 0x12345678

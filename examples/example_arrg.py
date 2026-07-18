@@ -1,4 +1,4 @@
-from shi.arrg import arrg
+from shi.experimental.arrg import arrg
 
 # Global variables
 a = 100

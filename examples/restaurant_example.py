@@ -1,4 +1,4 @@
-from shi.arrg import arrg
+from shi.experimental.arrg import arrg
 from shi.cli import cli, run_cli  # New import
 import json  # New import for JSON parsing
 
