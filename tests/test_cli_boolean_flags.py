@@ -37,9 +37,8 @@ class TestCliBooleanFlags(unittest.TestCase):
             pass
 
         cli_args_raw = ["android++", "board=redrix"]
-        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
-        # Should still be in parsed_args, just like var=val
-        self.assertEqual(parsed.arguments, {"android": True, "board": "redrix"})
+        with self.assertRaises(TypeError):
+            parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
 
     def test_parse_cli_args_boolean_flag_suffix_fallback_to_positional(self):
         @cli
@@ -93,6 +92,39 @@ class TestCliBooleanFlags(unittest.TestCase):
         cli_args_raw = ["android-"]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(parsed.arguments, {"android": False})
+
+    def test_parse_cli_args_boolean_explicit_values(self):
+        @cli
+        def test_func(reset = True, force: bool = False):
+            pass
+
+        # reset=-
+        cli_args_raw = ["reset=-", "force=+"]
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        self.assertEqual(parsed.arguments, {"reset": False, "force": True})
+
+        # reset=--
+        cli_args_raw = ["reset=--", "force=++"]
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        self.assertEqual(parsed.arguments, {"reset": False, "force": True})
+
+    def test_parse_cli_args_no_flag(self):
+        @cli
+        def test_func(reset = True, force: bool = True):
+            pass
+
+        cli_args_raw = ["--no-reset", "--no-force"]
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        self.assertEqual(parsed.arguments, {"reset": False, "force": False})
+
+    def test_parse_cli_args_double_dash_boolean_flags(self):
+        @cli
+        def test_func(reset = False, force: bool = False):
+            pass
+
+        cli_args_raw = ["--reset", "--force"]
+        parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
+        self.assertEqual(parsed.arguments, {"reset": True, "force": True})
 
 
 

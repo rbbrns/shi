@@ -53,7 +53,14 @@ def convert_value(value_str: str, target_type: Any) -> Any:
     Falls back to the original string if conversion fails.
     """
 
+    if isinstance(value_str, bool):
+        return value_str
+
     if target_type is inspect.Parameter.empty:
+        if value_str in ("+", "++", "True", "true"):
+            return True
+        if value_str in ("-", "--", "False", "false"):
+            return False
         try:
             return int(value_str, 10)
         except ValueError:
@@ -116,7 +123,7 @@ def convert_value(value_str: str, target_type: Any) -> Any:
         sys.exit(1)
 
     if target_type is bool:
-        return value_str.lower() in ("true", "1", "t", "y", "yes")
+        return value_str.lower() in ("true", "1", "t", "y", "yes", "+", "++")
     if target_type is int:
         try:
             return int(value_str, 10)
@@ -166,24 +173,57 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
     raw_args: List[str] = []
     raw_kwargs: Dict[str, Any] = {}
 
-    cli_args_iter = iter(cli_args_raw)
-    for arg_str in cli_args_iter:
+    i = 0
+    while i < len(cli_args_raw):
+        arg_str = cli_args_raw[i]
         if match := re.match(r"^--([^=\s]+)(=(.+))?$", arg_str):
             key, _, value_str = match.groups()
+            
+            # Handle --no-<flag>
+            is_no_flag = False
+            if key.startswith("no-"):
+                potential_key = key[3:]
+                norm_pot_key = normalize_arg_name(potential_key)
+                if norm_pot_key in param_map:
+                    key = potential_key
+                    is_no_flag = True
+
             actual_key = param_map.get(normalize_arg_name(key), key.replace("-", "_"))
-            if value_str is None:
-                try:
-                    value_str = next(cli_args_iter)
-                except StopIteration:
-                    print(f"Error: Expected value after '{arg_str}'")
-                    sys.exit(1)
-            raw_kwargs[actual_key] = value_str
+            if is_no_flag:
+                if value_str is None:
+                    raw_kwargs[actual_key] = False
+                else:
+                    raw_kwargs[actual_key] = False
+            else:
+                if value_str is None:
+                    is_bool = False
+                    if actual_key in sig.parameters:
+                        param = sig.parameters[actual_key]
+                        is_bool = is_bool_parameter(param) or is_unannotated_none_default(param)
+                    
+                    if is_bool:
+                        raw_kwargs[actual_key] = True
+                    else:
+                        # Peek at next arg
+                        if i + 1 < len(cli_args_raw):
+                            next_arg = cli_args_raw[i + 1]
+                            if next_arg.startswith("-") or "=" in next_arg or re.match(r"^.+(\+\+|--|\+|-|~~|~)$", next_arg):
+                                raw_kwargs[actual_key] = True
+                            else:
+                                raw_kwargs[actual_key] = next_arg
+                                i += 1
+                        else:
+                            raw_kwargs[actual_key] = True
+                else:
+                    raw_kwargs[actual_key] = value_str
+            i += 1
         elif match := re.match(r"^([^=\s]+)=(.+)$", arg_str):
             key, value_str = match.groups()
             actual_key = param_map.get(normalize_arg_name(key), key.replace("-", "_"))
             raw_kwargs[actual_key] = value_str
+            i += 1
         elif match := re.match(
-            r"^([a-zA-Z_][a-zA-Z0-9_]*)(\+\+|--|!~~|!~|\+|-|~~~|~~|~)$", arg_str
+            r"^([a-zA-Z_][a-zA-Z0-9_\-]*)(\+\+|--|!~~|!~|\+|-|~~~|~~|~)$", arg_str
         ):
             # Handle Loh postfix operators
             key, op = match.groups()
@@ -194,7 +234,7 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
                     param = sig.parameters[actual_key]
                     if param.annotation != bool and not (
                         param.annotation == inspect.Parameter.empty
-                        and isinstance(param.default, bool)
+                        and (isinstance(param.default, bool) or param.default is None)
                     ):
                         is_valid_op = False
 
@@ -209,18 +249,10 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
                     raw_kwargs[actual_key] = True
             else:
                 raw_args.append(arg_str)
-            else:
-                is_bool = True
-                if actual_key in sig.parameters:
-                    param = sig.parameters[actual_key]
-                    is_bool = is_bool_parameter(param) or is_unannotated_none_default(param)
-
-                if is_bool:
-                    raw_kwargs[actual_key] = op in ("++", "+")
-                else:
-                    raw_args.append(arg_str)
+            i += 1
         else:
             raw_args.append(arg_str)
+            i += 1
 
     # Convert types based on signature
     positional_params = [
@@ -249,7 +281,19 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
             converted_kwargs[key] = val
         elif key in sig.parameters:
             param = sig.parameters[key]
-            converted_kwargs[key] = convert_value(val, param.annotation)
+            # Infer target_type from default if annotation is empty
+            target_type = param.annotation
+            if target_type is inspect.Parameter.empty:
+                if is_bool_parameter(param):
+                    target_type = bool
+                elif param.default is not inspect.Parameter.empty and param.default is not None:
+                    if isinstance(param.default, str):
+                        target_type = str
+                    elif isinstance(param.default, int):
+                        target_type = int
+                    elif isinstance(param.default, float):
+                        target_type = float
+            converted_kwargs[key] = convert_value(val, target_type)
         else:
             converted_kwargs[key] = convert_value(val, inspect.Parameter.empty)
 
@@ -262,6 +306,10 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
             bind_kwargs[key] = val
         else:
             extra_kwargs[key] = val
+
+    if extra_kwargs and not has_var_keyword:
+        extra_key = list(extra_kwargs.keys())[0]
+        raise TypeError(f"got an unexpected keyword argument '{extra_key}'")
 
     # Bind and apply defaults
     bound = sig.bind(*converted_args, **bind_kwargs)
@@ -346,9 +394,8 @@ def check_command_collision(new_name: str):
             )
 
 
-def cli(thing: Any) -> Any:
-    """Decorator to register a function or all public methods of a class."""
->>>>>>> 6632952 (feat: shi: Add collision detection for commands and arguments)
+class CliDecorator:
+    """Decorator to register a function, module, or class, with support for dynamic attribute access to registered commands."""
 
     def __call__(self, thing: Any) -> Any:
         if inspect.isclass(thing):
@@ -361,6 +408,8 @@ def cli(thing: Any) -> Any:
                 original_func = (
                     func.__wrapped__ if hasattr(func, "__wrapped__") else func
                 )
+                check_command_collision(name)
+                check_argument_collisions(original_func)
                 cli_commands[name] = (func, original_func)
 
                 import shi.main
@@ -380,6 +429,8 @@ def cli(thing: Any) -> Any:
                 original_func = (
                     func.__wrapped__ if hasattr(func, "__wrapped__") else func
                 )
+                check_command_collision(original_func.__name__)
+                check_argument_collisions(original_func)
                 cli_commands[original_func.__name__] = (func, original_func)
 
             import shi.main
@@ -390,6 +441,8 @@ def cli(thing: Any) -> Any:
             # It's a function, register it directly
             func = thing
             original_func = func.__wrapped__ if hasattr(func, "__wrapped__") else func
+            check_command_collision(original_func.__name__)
+            check_argument_collisions(original_func)
             cli_commands[original_func.__name__] = (func, original_func)
 
             import shi.main
