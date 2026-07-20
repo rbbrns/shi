@@ -269,7 +269,7 @@ class TestCli(unittest.TestCase):
         ]
         parsed = parse_cli_args(self.get_original_func("test_func"), cli_args_raw)
         self.assertEqual(
-            parsed,
+            parsed.arguments,
             {
                 "a": True,
                 "b": True,

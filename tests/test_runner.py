@@ -20,12 +20,16 @@ class TestRunner(unittest.TestCase):
             # Run using the current virtual env python
             python_bin = sys.executable
             cmd = [python_bin, temp_path] + args
+            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            env = dict(os.environ)
+            env["PYTHONPATH"] = repo_root + (os.pathsep + env["PYTHONPATH"] if "PYTHONPATH" in env else "")
             result = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                cwd="/Users/robbarnes/Development/shi",
+                cwd=repo_root,
+                env=env,
             )
             return result.returncode, result.stdout, result.stderr
         finally:

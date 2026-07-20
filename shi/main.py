@@ -190,16 +190,8 @@ def _run_main_at_exit():
             args_to_parse = sys.argv[1:]
 
         try:
-            parsed_args = parse_cli_args(orig, args_to_parse)
-            final_args = {**parsed_args}
-            for name, parameter in inspect.signature(orig).parameters.items():
-                if (
-                    name not in final_args
-                    and parameter.default != inspect.Parameter.empty
-                ):
-                    final_args[name] = parameter.default
-
-            rtn = wrapped(**final_args)
+            bound = parse_cli_args(orig, args_to_parse)
+            rtn = wrapped(*bound.args, **bound.kwargs)
             if rtn is not None:
                 print(rtn)
         except TypeError as e:

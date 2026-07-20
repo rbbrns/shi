@@ -198,8 +198,6 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
                     raw_kwargs[key] = True
             else:
                 raw_args.append(arg_str)
-            else:
-                raw_args.append(arg_str)
         else:
             raw_args.append(arg_str)
 
