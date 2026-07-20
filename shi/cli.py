@@ -451,6 +451,10 @@ class CliDecorator:
             return func
 
     def __getattr__(self, name: str) -> Any:
+        if name == "cli":
+            return self
+        if name in ("run_cli", "main", "nocli", "show_usage", "show_command_help"):
+            return globals()[name]
         if name in cli_commands:
             return cli_commands[name][0]  # Return the wrapped function
         raise AttributeError(f"module/decorator 'cli' has no attribute '{name}'")
@@ -615,6 +619,9 @@ def run_cli(argv: List[str] = None, debug: bool = False, case_insensitive: bool 
     except TypeError as e:
         print(f"Error calling command '{matched_cmd_name}': {e}")
         raise e
+
+
+main = run_cli
 
 
 if __name__ == "__main__":

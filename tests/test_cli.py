@@ -435,6 +435,11 @@ class TestCli(unittest.TestCase):
                 def Command_One(self): pass
         self.assertIn("Command collision detected", str(cm.exception))
 
+    def test_cli_decorator_module_attribute_access(self):
+        self.assertEqual(cli.cli, cli)
+        self.assertTrue(callable(cli.run_cli))
+        self.assertTrue(callable(cli.nocli))
+
 
 if __name__ == "__main__":
     unittest.main()
