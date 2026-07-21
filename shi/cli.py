@@ -28,6 +28,313 @@ from rich.markup import escape
 cli_commands: Dict[str, Tuple[Callable, Callable]] = {}
 console = Console()
 
+debug = None
+time = None
+money = None
+effort = None
+
+
+def extract_global_args_from_list(argv: List[str]) -> Tuple[Dict[str, Any], List[str]]:
+    global_keys = {
+        "debug": ["debug", "d", "DEBUG", "D"],
+        "time": ["time", "t", "TIME", "T"],
+        "money": ["money", "m", "MONEY", "M"],
+        "effort": ["effort", "e", "EFFORT", "E"],
+    }
+    key_map = {}
+    for long_name, variations in global_keys.items():
+        for v in variations:
+            key_map[v] = long_name
+
+    raw_globals = {}
+    clean_argv = []
+    i = 0
+    n = len(argv)
+    while i < n:
+        arg = argv[i]
+
+        # 1. Check for postfix operators
+        postfix_match = re.match(
+            r"^(" + "|".join(key_map.keys()) + r")(\+\+|--|!~~|!~|\+|-|~~~|~~|~)$",
+            arg,
+            re.IGNORECASE,
+        )
+        if postfix_match:
+            key, op = postfix_match.groups()
+            norm_key = key_map[key.lower()]
+            if op in ("+", "++", "!~", "!~~"):
+                raw_globals[norm_key] = True
+            elif op in ("-", "--"):
+                raw_globals[norm_key] = False
+            elif op in ("~", "~~", "~~~"):
+                raw_globals[norm_key] = None
+            i += 1
+            continue
+
+        # 2. Check for key=value format (with or without leading --)
+        eq_match = re.match(
+            r"^(--)?(" + "|".join(key_map.keys()) + r")=(.+)$", arg, re.IGNORECASE
+        )
+        if eq_match:
+            _, key, val = eq_match.groups()
+            norm_key = key_map[key.lower()]
+            raw_globals[norm_key] = val
+            i += 1
+            continue
+
+        # 3. Check for standalone --key or -key
+        flag_match = re.match(
+            r"^(--|-)?(" + "|".join(key_map.keys()) + r")$", arg, re.IGNORECASE
+        )
+        if flag_match:
+            _, key = flag_match.groups()
+            norm_key = key_map[key.lower()]
+            # Check if there is a next argument as value
+            if i + 1 < n:
+                next_arg = argv[i + 1]
+                if not next_arg.startswith("-") and "=" not in next_arg:
+                    raw_globals[norm_key] = next_arg
+                    i += 2
+                    continue
+            raw_globals[norm_key] = True
+            i += 1
+            continue
+
+        clean_argv.append(arg)
+        i += 1
+
+    return raw_globals, clean_argv
+
+
+def normalize_debug(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return None if val == 0 else val
+
+    val_str = str(val).strip().lower()
+    if val_str in ("none", "false", "null", "nil"):
+        return None
+    if val_str == "true":
+        return True
+
+    try:
+        if "." in val_str:
+            f_val = float(val_str)
+            return None if f_val == 0 else f_val
+        else:
+            i_val = int(val_str)
+            return None if i_val == 0 else i_val
+    except ValueError:
+        pass
+
+    return val_str
+
+
+def normalize_time(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return None if not val else True
+    if isinstance(val, (int, float)):
+        return None if val == 0 else val
+
+    val_str = str(val).strip().lower()
+    if val_str in ("none", "false", "null", "nil"):
+        return None
+    if val_str == "true":
+        return True
+
+    match = re.match(r"^([0-9.]+)\s*([a-zA-Zµ]+)$", val_str)
+    if match:
+        num_str, unit = match.groups()
+        try:
+            num = float(num_str)
+            multipliers = {
+                "ns": 1e-9,
+                "us": 1e-6,
+                "µs": 1e-6,
+                "ms": 1e-3,
+                "s": 1.0,
+                "sec": 1.0,
+                "seconds": 1.0,
+                "m": 60.0,
+                "min": 60.0,
+                "minutes": 60.0,
+                "h": 3600.0,
+                "hr": 3600.0,
+                "hours": 3600.0,
+                "d": 86400.0,
+                "day": 86400.0,
+                "days": 86400.0,
+                "w": 604800.0,
+                "wk": 604800.0,
+                "weeks": 604800.0,
+                "y": 31536000.0,
+                "yr": 31536000.0,
+                "years": 31536000.0,
+            }
+            if unit in multipliers:
+                return num * multipliers[unit]
+        except ValueError:
+            pass
+
+    try:
+        if "." in val_str:
+            f_val = float(val_str)
+            return None if f_val == 0 else f_val
+        else:
+            i_val = int(val_str)
+            return None if i_val == 0 else i_val
+    except ValueError:
+        pass
+
+    return val_str
+
+
+def normalize_money(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return None if not val else True
+    if isinstance(val, (int, float)):
+        return None if val == 0 else val
+
+    val_str = str(val).strip()
+    val_lower = val_str.lower()
+    if val_lower in ("none", "false", "null", "nil"):
+        return None
+    if val_lower == "true":
+        return True
+
+    if "$" in val_str:
+        clean_str = val_str.replace("$", "").strip()
+        try:
+            return float(clean_str)
+        except ValueError:
+            pass
+
+    try:
+        if "." in val_lower:
+            f_val = float(val_lower)
+            return None if f_val == 0 else f_val
+        else:
+            i_val = int(val_lower)
+            return None if i_val == 0 else i_val
+    except ValueError:
+        pass
+
+    return val_str
+
+
+def normalize_effort(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return None if not val else True
+    if isinstance(val, (int, float)):
+        return None if val == 0 else val
+
+    val_str = str(val).strip().lower()
+    if val_str in ("none", "false", "null", "nil"):
+        return None
+    if val_str == "true":
+        return True
+
+    try:
+        if "." in val_str:
+            f_val = float(val_str)
+            return None if f_val == 0 else f_val
+        else:
+            i_val = int(val_str)
+            return None if i_val == 0 else i_val
+    except ValueError:
+        pass
+
+    return val_str
+
+
+def process_globals(raw_globals: Dict[str, Any]) -> Dict[str, Any]:
+    global debug, time, money, effort
+    normalized = {}
+    if "debug" in raw_globals:
+        normalized["debug"] = normalize_debug(raw_globals["debug"])
+    if "time" in raw_globals:
+        normalized["time"] = normalize_time(raw_globals["time"])
+    if "money" in raw_globals:
+        normalized["money"] = normalize_money(raw_globals["money"])
+    if "effort" in raw_globals:
+        normalized["effort"] = normalize_effort(raw_globals["effort"])
+
+    eff = normalized.get("effort")
+    if eff is not None:
+        calc_time = None
+        calc_money = None
+        if isinstance(eff, (int, float)):
+            calc_time = float(eff) * 3600.0
+            calc_money = float(eff) * 10.0
+        elif isinstance(eff, str):
+            eff_str = eff.lower()
+            if eff_str == "coffee":
+                calc_time = 3600.0
+                calc_money = 5.0
+            elif eff_str == "beer":
+                calc_time = 7200.0
+                calc_money = 8.0
+            elif eff_str == "pizza":
+                calc_time = 10800.0
+                calc_money = 20.0
+            elif eff_str == "lunch":
+                calc_time = 5400.0
+                calc_money = 15.0
+            elif eff_str == "weekend":
+                calc_time = 172800.0
+                calc_money = 200.0
+            else:
+                calc_time = 3600.0
+                calc_money = 10.0
+
+        if calc_time is not None and normalized.get("time") is None:
+            normalized["time"] = calc_time
+        if calc_money is not None and normalized.get("money") is None:
+            normalized["money"] = calc_money
+
+    # Update module-level globals
+    if "debug" in normalized:
+        debug = normalized["debug"]
+    if "time" in normalized:
+        time = normalized["time"]
+    if "money" in normalized:
+        money = normalized["money"]
+    if "effort" in normalized:
+        effort = normalized["effort"]
+
+    return normalized
+
+
+def inject_globals(
+    sig: inspect.Signature,
+    final_args: Dict[str, Any],
+    normalized_globals: Dict[str, Any],
+) -> None:
+    has_kwargs = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+    )
+    global_keys = {
+        "debug": ["debug", "d", "DEBUG", "D"],
+        "time": ["time", "t", "TIME", "T"],
+        "money": ["money", "m", "MONEY", "M"],
+        "effort": ["effort", "e", "EFFORT", "E"],
+    }
+    for g_name, val in normalized_globals.items():
+        variations = global_keys[g_name]
+        for var in variations:
+            if var in sig.parameters or has_kwargs:
+                if var not in final_args:
+                    final_args[var] = val
+
 
 def _register_aliases():
     """Scan the module globals of registered functions for any aliases."""
@@ -74,16 +381,16 @@ def convert_value(value_str: str, target_type: Any) -> Any:
             return float(value_str)
         except ValueError:
             pass
-        if value_str in ("True", "False", "None") or (
-            value_str.startswith("[") and value_str.endswith("]")
-        ) or (
-            value_str.startswith("{") and value_str.endswith("}")
+        if (
+            value_str in ("True", "False", "None")
+            or (value_str.startswith("[") and value_str.endswith("]"))
+            or (value_str.startswith("{") and value_str.endswith("}"))
         ):
             try:
                 return eval(value_str)
             except Exception:
                 pass
-        return value_str # Fallback if no conversion works
+        return value_str  # Fallback if no conversion works
 
     # Enum support
     if isinstance(target_type, type) and issubclass(target_type, Enum):
@@ -149,16 +456,12 @@ def convert_value(value_str: str, target_type: Any) -> Any:
 
 def is_bool_parameter(param: inspect.Parameter) -> bool:
     return param.annotation is bool or (
-        param.annotation is inspect.Parameter.empty
-        and isinstance(param.default, bool)
+        param.annotation is inspect.Parameter.empty and isinstance(param.default, bool)
     )
 
 
 def is_unannotated_none_default(param: inspect.Parameter) -> bool:
-    return (
-        param.annotation is inspect.Parameter.empty
-        and param.default is None
-    )
+    return param.annotation is inspect.Parameter.empty and param.default is None
 
 
 def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArguments:
@@ -178,7 +481,7 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
         arg_str = cli_args_raw[i]
         if match := re.match(r"^--([^=\s]+)(=(.+))?$", arg_str):
             key, _, value_str = match.groups()
-            
+
             # Handle --no-<flag>
             is_no_flag = False
             if key.startswith("no-"):
@@ -199,15 +502,21 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
                     is_bool = False
                     if actual_key in sig.parameters:
                         param = sig.parameters[actual_key]
-                        is_bool = is_bool_parameter(param) or is_unannotated_none_default(param)
-                    
+                        is_bool = is_bool_parameter(
+                            param
+                        ) or is_unannotated_none_default(param)
+
                     if is_bool:
                         raw_kwargs[actual_key] = True
                     else:
                         # Peek at next arg
                         if i + 1 < len(cli_args_raw):
                             next_arg = cli_args_raw[i + 1]
-                            if next_arg.startswith("-") or "=" in next_arg or re.match(r"^.+(\+\+|--|\+|-|~~|~)$", next_arg):
+                            if (
+                                next_arg.startswith("-")
+                                or "=" in next_arg
+                                or re.match(r"^.+(\+\+|--|\+|-|~~|~)$", next_arg)
+                            ):
                                 raw_kwargs[actual_key] = True
                             else:
                                 raw_kwargs[actual_key] = next_arg
@@ -258,11 +567,16 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
     positional_params = [
         p
         for p in sig.parameters.values()
-        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        if p.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
     var_positional_param = next(
-        (p for p in sig.parameters.values() if p.kind == inspect.Parameter.VAR_POSITIONAL),
-        None
+        (
+            p
+            for p in sig.parameters.values()
+            if p.kind == inspect.Parameter.VAR_POSITIONAL
+        ),
+        None,
     )
 
     converted_args = []
@@ -271,7 +585,9 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
             param = positional_params[i]
             converted_args.append(convert_value(arg_str, param.annotation))
         elif var_positional_param:
-            converted_args.append(convert_value(arg_str, var_positional_param.annotation))
+            converted_args.append(
+                convert_value(arg_str, var_positional_param.annotation)
+            )
         else:
             converted_args.append(arg_str)
 
@@ -286,7 +602,10 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
             if target_type is inspect.Parameter.empty:
                 if is_bool_parameter(param):
                     target_type = bool
-                elif param.default is not inspect.Parameter.empty and param.default is not None:
+                elif (
+                    param.default is not inspect.Parameter.empty
+                    and param.default is not None
+                ):
                     if isinstance(param.default, str):
                         target_type = str
                     elif isinstance(param.default, int):
@@ -298,7 +617,9 @@ def parse_cli_args(func: Callable, cli_args_raw: List[str]) -> inspect.BoundArgu
             converted_kwargs[key] = convert_value(val, inspect.Parameter.empty)
 
     # Separate bindable kwargs from extra kwargs
-    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+    has_var_keyword = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+    )
     bind_kwargs = {}
     extra_kwargs = {}
     for key, val in converted_kwargs.items():
@@ -331,7 +652,10 @@ def check_argument_collisions(func: Callable):
     normalized_names = {}
     for param_name in sig.parameters:
         param = sig.parameters[param_name]
-        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+        if param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
             continue
         norm_name = normalize_arg_name(param_name)
         if norm_name in normalized_names:
@@ -343,9 +667,13 @@ def check_argument_collisions(func: Callable):
 
 
 def check_command_collision(new_name: str):
-    norm_new = normalize_command_name(new_name, case_insensitive=True, normalize_separators=True)
+    norm_new = normalize_command_name(
+        new_name, case_insensitive=True, normalize_separators=True
+    )
     for registered_name in cli_commands:
-        norm_reg = normalize_command_name(registered_name, case_insensitive=True, normalize_separators=True)
+        norm_reg = normalize_command_name(
+            registered_name, case_insensitive=True, normalize_separators=True
+        )
         if norm_new == norm_reg:
             raise ValueError(
                 f"Command collision detected: '{new_name}' and '{registered_name}' "
@@ -355,6 +683,8 @@ def check_command_collision(new_name: str):
 
 class CliDecorator:
     """Decorator to register a function, module, or class, with support for dynamic attribute access to registered commands."""
+
+
 def normalize_arg_name(name: str) -> str:
     return name.lower().replace("-", "").replace("_", "")
 
@@ -364,7 +694,10 @@ def check_argument_collisions(func: Callable):
     normalized_names = {}
     for param_name in sig.parameters:
         param = sig.parameters[param_name]
-        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+        if param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
             continue
         norm_name = normalize_arg_name(param_name)
         if norm_name in normalized_names:
@@ -375,7 +708,9 @@ def check_argument_collisions(func: Callable):
         normalized_names[norm_name] = param_name
 
 
-def normalize_command_name(name: str, case_insensitive: bool, normalize_separators: bool) -> str:
+def normalize_command_name(
+    name: str, case_insensitive: bool, normalize_separators: bool
+) -> str:
     if case_insensitive:
         name = name.lower()
     if normalize_separators:
@@ -384,9 +719,13 @@ def normalize_command_name(name: str, case_insensitive: bool, normalize_separato
 
 
 def check_command_collision(new_name: str):
-    norm_new = normalize_command_name(new_name, case_insensitive=True, normalize_separators=True)
+    norm_new = normalize_command_name(
+        new_name, case_insensitive=True, normalize_separators=True
+    )
     for registered_name in cli_commands:
-        norm_reg = normalize_command_name(registered_name, case_insensitive=True, normalize_separators=True)
+        norm_reg = normalize_command_name(
+            registered_name, case_insensitive=True, normalize_separators=True
+        )
         if norm_new == norm_reg:
             raise ValueError(
                 f"Command collision detected: '{new_name}' and '{registered_name}' "
@@ -505,7 +844,9 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
-def normalize_command_name(name: str, case_insensitive: bool = True, normalize_separators: bool = True) -> str:
+def normalize_command_name(
+    name: str, case_insensitive: bool = True, normalize_separators: bool = True
+) -> str:
     if case_insensitive:
         name = name.lower()
     if normalize_separators:
@@ -545,7 +886,6 @@ def show_command_help(cmd_name: str):
     sys.exit(0)
 
 
-
 def show_usage(exit_code: int = 1):
     _register_aliases()
     console.print(
@@ -564,7 +904,12 @@ def show_usage(exit_code: int = 1):
 cli_run_called = False
 
 
-def run_cli(argv: List[str] = None, debug: bool = False, case_insensitive: bool = True, normalize_separators: bool = True) -> None:
+def run_cli(
+    argv: List[str] = None,
+    debug: bool = False,
+    case_insensitive: bool = True,
+    normalize_separators: bool = True,
+) -> None:
     """Dispatch CLI commands based on argv.
 
     If argv is None, defaults to sys.argv[1:].
@@ -581,17 +926,24 @@ def run_cli(argv: List[str] = None, debug: bool = False, case_insensitive: bool 
     if len(argv) < 1:
         show_usage(exit_code=1)
 
-    if argv[-1] == "?":
-        if len(argv) == 1:
+    # Extract global keyword arguments
+    raw_globals, clean_args = extract_global_args_from_list(argv[1:])
+    clean_argv = [argv[0]] + clean_args
+
+    if clean_argv[-1] == "?":
+        if len(clean_argv) == 1:
             show_usage(exit_code=0)
         else:
-            show_command_help(argv[0])
+            show_command_help(clean_argv[0])
 
-    command_name = argv[0]
+    command_name = clean_argv[0]
     matched_cmd_name = None
     for registered_name in cli_commands:
-        if normalize_command_name(registered_name, case_insensitive, normalize_separators) == \
-           normalize_command_name(command_name, case_insensitive, normalize_separators):
+        if normalize_command_name(
+            registered_name, case_insensitive, normalize_separators
+        ) == normalize_command_name(
+            command_name, case_insensitive, normalize_separators
+        ):
             matched_cmd_name = registered_name
             break
 
@@ -603,7 +955,7 @@ def run_cli(argv: List[str] = None, debug: bool = False, case_insensitive: bool 
 
     wrapped_func, original_func = cli_commands[matched_cmd_name]
     try:
-        bound = parse_cli_args(original_func, argv[1:])
+        bound = parse_cli_args(original_func, clean_argv[1:])
     except TypeError as e:
         print(f"Error parsing arguments for '{matched_cmd_name}': {e}")
         sys.exit(1)
@@ -611,6 +963,10 @@ def run_cli(argv: List[str] = None, debug: bool = False, case_insensitive: bool 
     sig = inspect.signature(original_func)
     if debug and "debug" in sig.parameters and "debug" not in bound.arguments:
         bound.arguments["debug"] = True
+
+    # Normalize and inject global arguments
+    normalized_globals = process_globals(raw_globals)
+    inject_globals(sig, bound.arguments, normalized_globals)
 
     try:
         rtn = wrapped_func(*bound.args, **bound.kwargs)

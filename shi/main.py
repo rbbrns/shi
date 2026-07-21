@@ -190,7 +190,22 @@ def _run_main_at_exit():
             args_to_parse = sys.argv[1:]
 
         try:
-            bound = parse_cli_args(orig, args_to_parse)
+            from .cli import (
+                extract_global_args_from_list,
+                process_globals,
+                inject_globals,
+            )
+
+            raw_globals, clean_args_to_parse = extract_global_args_from_list(
+                args_to_parse
+            )
+            bound = parse_cli_args(orig, clean_args_to_parse)
+
+            # Normalize and inject global arguments
+            normalized_globals = process_globals(raw_globals)
+            sig = inspect.signature(orig)
+            inject_globals(sig, bound.arguments, normalized_globals)
+
             rtn = wrapped(*bound.args, **bound.kwargs)
             if rtn is not None:
                 print(rtn)
